@@ -147,23 +147,23 @@ if (!PG_URL) {
                   ('tenant-b','https://b.test','B','running shoes','# b', 1700000000)`,
         );
 
-        await tenant.exec("SET receipts.tenant_id = 'tenant-a'");
+        await tenant.exec("SET quorum.tenant_id = 'tenant-a'");
         const mine = await tenant.query('SELECT tenant_id, product_title FROM reports');
         assert.deepEqual(mine.map((r) => r['product_title']), ['A']);
 
-        await tenant.exec("SET receipts.tenant_id = 'tenant-b'");
+        await tenant.exec("SET quorum.tenant_id = 'tenant-b'");
         const theirs = await tenant.query('SELECT tenant_id, product_title FROM reports');
         assert.deepEqual(theirs.map((r) => r['product_title']), ['B']);
       });
 
       await t.test('an unset tenant sees nothing, so it fails closed', async () => {
-        await tenant.exec('RESET receipts.tenant_id');
+        await tenant.exec('RESET quorum.tenant_id');
         const rows = await tenant.query('SELECT tenant_id FROM reports');
         assert.equal(rows.length, 0, 'an unset tenant id must match nothing rather than everything');
       });
 
       await t.test('a tenant cannot write a report under another tenant id', async () => {
-        await tenant.exec("SET receipts.tenant_id = 'tenant-a'");
+        await tenant.exec("SET quorum.tenant_id = 'tenant-a'");
         await assert.rejects(
           () => tenant.query(
             `INSERT INTO reports (tenant_id, product_url, product_title, category, markdown, created_at)

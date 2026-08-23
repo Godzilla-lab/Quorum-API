@@ -69,10 +69,18 @@ CREATE POLICY ad_observations_write_service ON ad_observations
 
 -- Tenant owned tables. current_setting is read with the missing_ok flag so an
 -- unset tenant yields NULL and therefore matches nothing, which fails closed.
+--
+-- THE SETTING NAME IS PART OF THE SCHEMA. Renamed from `receipts.tenant_id` to
+-- `quorum.tenant_id` on 2026-08-23, deliberately BEFORE this migration had ever
+-- been applied to a real database. Once a policy exists in a live cluster the
+-- name is load bearing: changing it means every caller sets a variable no
+-- policy reads, and a policy reading a variable nobody sets matches nothing,
+-- which fails closed and looks exactly like an empty result set. Free to change
+-- today, a migration with a tenant isolation window tomorrow.
 CREATE POLICY reports_own ON reports
   FOR ALL
-  USING (tenant_id = current_setting('receipts.tenant_id', true))
-  WITH CHECK (tenant_id = current_setting('receipts.tenant_id', true));
+  USING (tenant_id = current_setting('quorum.tenant_id', true))
+  WITH CHECK (tenant_id = current_setting('quorum.tenant_id', true));
 
 CREATE POLICY products_read_all ON products
   FOR SELECT USING (true);
