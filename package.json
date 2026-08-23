@@ -1,5 +1,5 @@
 {
-  "name": "receipts-workspace",
+  "name": "quorum-workspace",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
@@ -11,6 +11,7 @@
   ],
   "scripts": {
     "build": "tsc -b",
+    "start": "node --disable-warning=ExperimentalWarning packages/server/src/bin.ts",
     "clean": "tsc -b --clean",
     "test": "node --disable-warning=ExperimentalWarning --test \"packages/**/*.test.ts\"",
     "lint": "tsc -b",
