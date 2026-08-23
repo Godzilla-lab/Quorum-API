@@ -58,11 +58,22 @@ Requires **Node 22.18 or newer**. No paid keys needed: Reddit via a public
 archive, YouTube, Shopify and direct fetch are all free.
 
 ```bash
-git clone <repo> && cd receipts
+git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
 npm test
 ```
+
+Keys are optional and go in a `.env` you copy from the template:
+
+```bash
+cp .env.example .env
+```
+
+`.env.example` lists every variable the code reads and what each one costs you
+by being absent. Nothing there is needed for `--offline`, and a missing key
+degrades a run rather than failing it, so it is worth starting with none of them
+and adding one when a report tells you what it could not reach.
 
 Then research something. The input is a **subject**, not a URL. Plain text
 works, a product URL works, and a product URL the store refuses still works,
