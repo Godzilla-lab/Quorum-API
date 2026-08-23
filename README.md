@@ -55,16 +55,32 @@ All optional. Put them in a `.env` at the repo root, which is gitignored.
 | `QUORUM_CONCURRENCY` | Concurrent report runs, default 2. Not a throughput dial: every concurrent run is concurrent pressure on the same volunteer archives. |
 | `PORT` | Default 8787. A host normally sets this. |
 
+## Three ways to use it
+
+| | what it is | who runs it |
+|---|---|---|
+| **CLI** | The whole engine on your machine, against a corpus you own | You |
+| **Hosted API** | The same engine against a **shared, already warm** corpus | Us |
+| **MCP server** | The API as tools an agent can call | **Not built yet** |
+
+They are the same pipeline. The only thing the hosted API sells that the source
+cannot is a corpus somebody already paid to fill: cold retrieval measured 596
+seconds and about 500 throttled requests, and the same category answers in half
+a second once it is warm.
+
+**Nothing is published to npm yet**, so today the CLI means cloning this repo.
+The `quorum` command below resolves inside the checkout and is not yet a global
+install.
+
 ## Quickstart
 
-Requires **Node 22.18 or newer**. No paid keys needed: Reddit via a public
-archive, YouTube, Shopify and direct fetch are all free.
+Requires **Node 22.18 or newer**, and nothing else.
 
 ```bash
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test
+npm test          # 953 tests, offline, no keys
 ```
 
 Nothing above needs a key, and `--offline` never touches the network at all.
@@ -97,7 +113,38 @@ can be chased and is never stated as a market pattern. Before anything is
 printed, every cited receipt is fetched back out of the corpus, and the run
 exits non zero if one of them does not resolve.
 
-`quorum --help` lists the flags.
+`quorum --help` lists the flags. Every command above runs from inside the
+checkout.
+
+### Running the API yourself
+
+The hosted API is one process and a corpus. It is the same engine the CLI runs.
+
+```bash
+QUORUM_CORPUS=./quorum.db QUORUM_API_KEYS=$(openssl rand -hex 32) PORT=8787 npm start
+```
+
+**Set `QUORUM_API_KEYS` or the instance is open**, which it will tell you on
+boot. Callers then authenticate with a bearer token:
+
+```bash
+curl -H "Authorization: Bearer $KEY" localhost:8787/v1/categories/running%20shoes
+```
+
+One instance serves everybody, and that is deliberate. The corpus is global
+because a category one caller warmed answers instantly for the next, which is
+the whole point of keeping one. Reports are the exception: they are tenant
+owned and row level security enforces it, verified against a real PostgreSQL 18.
+
+For anything beyond a laptop the corpus belongs in Postgres rather than SQLite,
+because SQLite's driver is synchronous and blocks the event loop on every read.
+See `docs/postgres.md`.
+
+### MCP
+
+Not built. `packages/mcp` is a placeholder, and when it lands it will be a
+client over the hosted API rather than a second implementation, so it inherits
+the same keys and the same limits.
 
 ## What the API does
 
