@@ -17,11 +17,19 @@
  *
  * THIS IS TEST INFRASTRUCTURE AND MUST NOT BE USED IN PRODUCTION.
  *
- * It is deliberately not exported from the package index. It has no TLS, no
- * connection pool, no SCRAM, no cancellation, no COPY, no reconnection, and it
- * assumes one statement in flight at a time. A hosted deployment uses a real
- * client and passes it to `openPostgresCorpus` unchanged, which is the entire
- * point of the injected executor.
+ * It is deliberately not exported from the package index. It has no connection
+ * pool, no cancellation, no COPY, no reconnection, and it assumes one statement
+ * in flight at a time. A hosted deployment uses a real client and passes it to
+ * `openPostgresCorpus` unchanged, which is the entire point of the injected
+ * executor.
+ *
+ * IT DOES NOW SPEAK TLS AND SCRAM-SHA-256, added 2026-08-23, and that is a
+ * change of reach rather than of purpose. Verification was limited to a local
+ * trust-authenticated server, so the driver had never met a HOSTED Postgres:
+ * a different major version, a managed extension set, and a connection over
+ * the public internet. Those are exactly the differences that break a
+ * migration, and the whole reason this client exists is that a fake never
+ * rejects invalid SQL. It still must not serve production traffic.
  *
  * TYPE CONVERSION MIMICS node-postgres ON PURPOSE.
  *
@@ -32,7 +40,8 @@
  */
 
 import { createConnection, type Socket } from 'node:net';
-import { createHash } from 'node:crypto';
+import { connect as tlsConnect } from 'node:tls';
+import { createHash, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { SqlExecutor } from './postgres.ts';
 
 export interface PgWireOptions {
@@ -43,6 +52,37 @@ export interface PgWireOptions {
   password?: string;
   /* Prepended to every statement. Used to isolate a test run in its own schema. */
   searchPath?: string;
+  /*
+   * Negotiate TLS before the startup packet. Required by every hosted provider
+   * and off by default, because the local server this was written against does
+   * not offer it and a failed negotiation is a worse error than not asking.
+   */
+  ssl?: boolean;
+}
+
+/*
+ * A PostgreSQL connection URI, as a hosted provider hands it to you.
+ *
+ * Parsed here rather than by the caller so a connection string never has to be
+ * split up by hand, which is how a password containing a `@` or a `/` ends up
+ * silently truncated.
+ */
+export function parsePgUri(uri: string): PgWireOptions {
+  const url = new URL(uri);
+  if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+    throw new Error(`not a postgres uri: ${url.protocol}`);
+  }
+  const sslmode = url.searchParams.get('sslmode');
+  return {
+    host: url.hostname,
+    port: url.port ? Number(url.port) : 5432,
+    user: decodeURIComponent(url.username),
+    password: decodeURIComponent(url.password),
+    database: url.pathname.replace(/^\//, '') || 'postgres',
+    /* `disable` is the only mode that means no. Everything else, including the
+     * `require` a hosted provider hands you, means negotiate. */
+    ssl: sslmode !== null && sslmode !== 'disable',
+  };
 }
 
 /* Postgres type OIDs we convert. Everything else stays text, which is what a
@@ -144,10 +184,113 @@ export interface PgWireClient extends SqlExecutor {
   end(): Promise<void>;
 }
 
-export async function connectPgWire(options: PgWireOptions): Promise<PgWireClient> {
-  const { host = '127.0.0.1', port = 5432, user, database, password, searchPath } = options;
+/*
+ * SCRAM-SHA-256, RFC 5802 and RFC 7677.
+ *
+ * Every hosted provider requires it, and Postgres has defaulted to it since 14,
+ * so md5 is now the legacy path rather than the normal one. It is here because
+ * the alternative was a dependency in a package whose whole shape exists to
+ * avoid one, and because the arithmetic is four HMACs and a PBKDF2, all of
+ * which are in `node:crypto`.
+ *
+ * WITHOUT CHANNEL BINDING, deliberately. `SCRAM-SHA-256-PLUS` binds the
+ * exchange to the TLS channel and defends against an attacker who already
+ * holds a valid certificate for the server. This client verifies the
+ * certificate chain, which closes that door first, and channel binding would
+ * add a tls-server-end-point hash for a threat that is out of scope for test
+ * infrastructure. The `n,,` prefix below says "I do not support it", which is
+ * the honest declaration rather than the `y,,` that claims a downgrade.
+ */
+export function scramFirstMessage(nonce: string, username = ''): { message: string; bare: string } {
+  /*
+   * The username is EMPTY for PostgreSQL, which is not an omission. RFC 5802
+   * carries it in `n=`, and Postgres ignores that field because the startup
+   * packet already named the user; sending it twice invites the two to
+   * disagree. It stays a parameter so the RFC 7677 vectors, which do populate
+   * it, can be asserted against rather than against this file's own output.
+   */
+  const bare = `n=${username},r=${nonce}`;
+  return { message: `n,,${bare}`, bare };
+}
 
-  const socket: Socket = createConnection({ host, port });
+export function scramFinalMessage(
+  password: string,
+  clientNonce: string,
+  clientFirstBare: string,
+  serverFirst: string,
+): { message: string; serverSignature: Buffer } {
+  const fields = new Map(
+    serverFirst.split(',').map((part) => [part.slice(0, 1), part.slice(2)] as const),
+  );
+  const serverNonce = fields.get('r') ?? '';
+  const salt = Buffer.from(fields.get('s') ?? '', 'base64');
+  const iterations = Number(fields.get('i') ?? 0);
+
+  /* The server must extend OUR nonce, never replace it. A server that returns
+   * an unrelated nonce is either broken or replaying somebody else's exchange,
+   * and continuing would authenticate against it anyway. */
+  if (!serverNonce.startsWith(clientNonce)) {
+    throw new Error('scram: the server nonce does not extend the client nonce');
+  }
+  if (!iterations || !salt.length) throw new Error('scram: the server sent no salt or iteration count');
+
+  const saltedPassword = pbkdf2Sync(password, salt, iterations, 32, 'sha256');
+  const hmac = (key: Buffer, data: string): Buffer => createHmac('sha256', key).update(data).digest();
+
+  const clientKey = createHmac('sha256', saltedPassword).update('Client Key').digest();
+  const storedKey = createHash('sha256').update(clientKey).digest();
+  const withoutProof = `c=biws,r=${serverNonce}`;
+  const authMessage = `${clientFirstBare},${serverFirst},${withoutProof}`;
+
+  const clientSignature = hmac(storedKey, authMessage);
+  const proof = Buffer.alloc(clientKey.length);
+  for (let i = 0; i < clientKey.length; i++) proof[i] = clientKey[i]! ^ clientSignature[i]!;
+
+  const serverKey = createHmac('sha256', saltedPassword).update('Server Key').digest();
+  const serverSignature = hmac(serverKey, authMessage);
+
+  return { message: `${withoutProof},p=${proof.toString('base64')}`, serverSignature };
+}
+
+/*
+ * Ask the server to speak TLS, then upgrade the socket.
+ *
+ * The SSLRequest packet is answered with a SINGLE BYTE and no frame, which is
+ * the one message in the protocol that does not follow the type-and-length
+ * shape the reader downstream assumes. It has to be read before that reader is
+ * attached, or the first byte of the TLS handshake is eaten as a message type.
+ */
+async function negotiateTls(plain: Socket, host: string): Promise<Socket> {
+  const request = Buffer.alloc(8);
+  request.writeInt32BE(8, 0);
+  request.writeInt32BE(80877103, 4);
+  plain.write(request);
+
+  const answer = await new Promise<string>((resolve, reject) => {
+    plain.once('data', (chunk: Buffer) => resolve(String.fromCharCode(chunk[0] ?? 0)));
+    plain.once('error', reject);
+  });
+  if (answer !== 'S') {
+    throw new Error(`this server refused TLS (answered ${JSON.stringify(answer)}). Connect without ssl, or to a server that offers it.`);
+  }
+
+  return await new Promise<Socket>((resolve, reject) => {
+    const secure = tlsConnect({ socket: plain, servername: host }, () => resolve(secure));
+    secure.once('error', reject);
+  });
+}
+
+export async function connectPgWire(options: PgWireOptions): Promise<PgWireClient> {
+  const { host = '127.0.0.1', port = 5432, user, database, password, searchPath, ssl = false } = options;
+
+  const plain: Socket = createConnection({ host, port });
+  plain.setNoDelay(true);
+  await new Promise<void>((resolve, reject) => {
+    plain.once('connect', resolve);
+    plain.once('error', reject);
+  });
+
+  const socket: Socket = ssl ? await negotiateTls(plain, host) : plain;
   socket.setNoDelay(true);
 
   let buffer = Buffer.alloc(0);
@@ -174,11 +317,6 @@ export async function connectPgWire(options: PgWireOptions): Promise<PgWireClien
 
   socket.on('data', (chunk) => { buffer = Buffer.concat([buffer, chunk]); drain(); });
   socket.on('error', (err) => { fatal = err; });
-
-  await new Promise<void>((resolve, reject) => {
-    socket.once('connect', resolve);
-    socket.once('error', reject);
-  });
 
   const errorFrom = (body: Buffer): Error => {
     const r = new Reader(body);
@@ -256,6 +394,10 @@ export async function connectPgWire(options: PgWireOptions): Promise<PgWireClien
     });
 
   /* --- startup and authentication --- */
+  const clientNonce = randomBytes(18).toString('base64');
+  let scramBare = '';
+  let expectedServerSignature: Buffer | null = null;
+
   await new Promise<void>((resolve, reject) => {
     onMessage = (type, body) => {
       if (type === 'E') { onMessage = null; reject(errorFrom(body)); return; }
@@ -274,8 +416,60 @@ export async function connectPgWire(options: PgWireOptions): Promise<PgWireClien
           socket.write(new Writer().cstring(`md5${outer}`).frame('p'));
           return;
         }
+        /* 10: SASL. The body lists the mechanisms the server will accept. */
+        if (code === 10) {
+          const offered: string[] = [];
+          for (;;) {
+            const name = r.cstring();
+            if (!name) break;
+            offered.push(name);
+          }
+          if (!offered.includes('SCRAM-SHA-256')) {
+            onMessage = null;
+            reject(new Error(`the server offered SASL mechanisms ${offered.join(', ')} and this client only speaks SCRAM-SHA-256`));
+            return;
+          }
+          const first = scramFirstMessage(clientNonce);
+          scramBare = first.bare;
+          const payload = Buffer.from(first.message, 'utf8');
+          socket.write(
+            new Writer().cstring('SCRAM-SHA-256').int32(payload.length).raw(payload).frame('p'),
+          );
+          return;
+        }
+        /* 11: SASLContinue, the server's first message. */
+        if (code === 11) {
+          try {
+            const serverFirst = body.subarray(4).toString('utf8');
+            const final = scramFinalMessage(password ?? '', clientNonce, scramBare, serverFirst);
+            expectedServerSignature = final.serverSignature;
+            socket.write(new Writer().raw(Buffer.from(final.message, 'utf8')).frame('p'));
+          } catch (err) {
+            onMessage = null;
+            reject(err instanceof Error ? err : new Error(String(err)));
+          }
+          return;
+        }
+        /*
+         * 12: SASLFinal. The server proves it knew the stored key too, and that
+         * proof is CHECKED. Skipping it would authenticate us to anything that
+         * completed the handshake, which is the mutual half of mutual auth and
+         * the reason SCRAM is worth more than a password over TLS.
+         */
+        if (code === 12) {
+          const fields = new Map(
+            body.subarray(4).toString('utf8').split(',').map((part) => [part.slice(0, 1), part.slice(2)] as const),
+          );
+          const presented = Buffer.from(fields.get('v') ?? '', 'base64');
+          const expected = expectedServerSignature;
+          if (!expected || presented.length !== expected.length || !timingSafeEqual(presented, expected)) {
+            onMessage = null;
+            reject(new Error('scram: the server failed to prove it knows the password'));
+          }
+          return;
+        }
         onMessage = null;
-        reject(new Error(`unsupported authentication method ${code}. This harness speaks trust, cleartext and md5 only, which is enough to verify a local database and not enough for a hosted one.`));
+        reject(new Error(`unsupported authentication method ${code}. This harness speaks trust, cleartext, md5 and SCRAM-SHA-256.`));
         return;
       }
       if (type === 'Z') { onMessage = null; resolve(); }

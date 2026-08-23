@@ -34,7 +34,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-import { connectPgWire, type PgWireClient } from './pg-wire.ts';
+import { connectPgWire, parsePgUri, type PgWireClient } from './pg-wire.ts';
 
 const PG_URL = process.env['QUORUM_PG_URL'];
 const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../migrations');
@@ -42,16 +42,14 @@ const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../mig
 if (!PG_URL) {
   test('postgres: row level security', { skip: 'set QUORUM_PG_URL to run this' }, () => {});
 } else {
-  const url = new URL(PG_URL);
-  const connect = (user: string): Promise<PgWireClient> => connectPgWire({
-    host: url.hostname,
-    port: Number(url.port || 5432),
-    user,
-    database: url.pathname.slice(1),
-    ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
-  });
+  /* Parsed, not split: a hosted url needs its sslmode honoured and its
+   * password decoded. See parsePgUri. */
+  const connection = parsePgUri(PG_URL);
+  /* Same connection, different role: this suite proves the policies by logging
+   * in as a tenant rather than as the owner. */
+  const connect = (user: string): Promise<PgWireClient> => connectPgWire({ ...connection, user });
 
-  const OWNER = decodeURIComponent(url.username);
+  const OWNER = connection.user;
   const schema = `rls_${process.pid}`;
   const tenantRole = `rls_tenant_${process.pid}`;
 

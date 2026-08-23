@@ -13,6 +13,7 @@
     "./tiers": "./src/tiers.ts"
   },
   "scripts": {
-    "test": "node --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\""
+    "test": "node --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\"",
+    "migrate": "node --disable-warning=ExperimentalWarning scripts/migrate.mjs"
   }
 }

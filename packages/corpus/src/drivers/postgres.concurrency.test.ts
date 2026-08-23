@@ -35,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import { openPostgresCorpus } from './postgres.ts';
-import { connectPgWire, type PgWireClient } from './pg-wire.ts';
+import { connectPgWire, parsePgUri, type PgWireClient } from './pg-wire.ts';
 import type { CorpusDriver, DocInput } from '../index.ts';
 
 const PG_URL = process.env['QUORUM_PG_URL'];
@@ -49,14 +49,10 @@ const ROWS_PER_WRITER = 150;
 if (!PG_URL) {
   test('postgres: concurrent writers', { skip: 'set QUORUM_PG_URL to run this' }, () => {});
 } else {
-  const url = new URL(PG_URL);
-  const connect = (): Promise<PgWireClient> => connectPgWire({
-    host: url.hostname,
-    port: Number(url.port || 5432),
-    user: decodeURIComponent(url.username),
-    database: url.pathname.slice(1),
-    ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
-  });
+  /* Parsed, not split: a hosted url needs its sslmode honoured and its
+   * password decoded. See parsePgUri. */
+  const connection = parsePgUri(PG_URL);
+  const connect = (): Promise<PgWireClient> => connectPgWire(connection);
 
   const doc = (i: number): DocInput => ({
     source: 'reddit',

@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url';
 import { runConformanceSuite } from '../conformance.ts';
 import type { CorpusDriver } from '../driver.ts';
 import { openPostgresCorpus } from './postgres.ts';
-import { connectPgWire } from './pg-wire.ts';
+import { connectPgWire, parsePgUri } from './pg-wire.ts';
 
 const PG_URL = process.env['QUORUM_PG_URL'];
 const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../migrations');
@@ -41,7 +41,10 @@ const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../mig
 if (!PG_URL) {
   test('postgres: conformance against a real database', { skip: 'set QUORUM_PG_URL to run this' }, () => {});
 } else {
-  const url = new URL(PG_URL);
+  /* Parsed rather than split by hand, so a hosted url works: `sslmode=require`
+   * becomes a real TLS negotiation, and a password containing `@` or `/`
+   * survives instead of being silently truncated. */
+  const connection = parsePgUri(PG_URL);
   let counter = 0;
 
   runConformanceSuite('postgres', async (now?: () => number): Promise<CorpusDriver> => {
@@ -52,13 +55,7 @@ if (!PG_URL) {
      */
     const schema = `conf_${process.pid}_${++counter}`;
 
-    const client = await connectPgWire({
-      host: url.hostname,
-      port: Number(url.port || 5432),
-      user: decodeURIComponent(url.username),
-      database: url.pathname.slice(1),
-      ...(url.password ? { password: decodeURIComponent(url.password) } : {}),
-    });
+    const client = await connectPgWire(connection);
 
     await client.exec(`CREATE SCHEMA ${schema}`);
     await client.exec(`SET search_path TO ${schema}`);
