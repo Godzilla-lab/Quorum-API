@@ -169,6 +169,70 @@ export interface PriorReport {
   createdAt: number;
 }
 
+/*
+ * A queued webhook delivery.
+ *
+ * ONE REPORT HAS ONE DELIVERY, so the report id is the key rather than a
+ * surrogate, and it is also the `webhook-id` header the receiver deduplicates
+ * on. A retry is the same message, so it must carry the same id.
+ *
+ * WHY THE PAYLOAD IS STORED RATHER THAN RE-RENDERED. The job queue holds
+ * reports in memory only, so after a restart there is nothing left to render
+ * from. Storing the exact bytes is what makes "durable" mean anything, and it
+ * is the same reason the bytes are a string and not an object: the bytes
+ * SIGNED must be the bytes SENT, and serialising twice invites a different key
+ * order.
+ *
+ * TENANT OWNED. Only `reports` carried a tenant id before this table, and the
+ * boundary note in the SQLite schema explains why that matters. A row here
+ * holds a customer's callback url and their report body, so it belongs on the
+ * same side of the line.
+ */
+export type WebhookDeliveryStatus = 'pending' | 'delivered' | 'exhausted' | 'refused';
+
+export interface WebhookDeliveryInput {
+  reportId: string;
+  tenantId?: string | null;
+  /* Selects the derived signing secret. See deriveSecret in the server. */
+  keyLabel: string;
+  /*
+   * Credential shaped. Receivers routinely carry a bearer token in the query
+   * string, so this is stored because durability requires it and is never
+   * logged.
+   */
+  url: string;
+  /* The exact bytes to sign and send. */
+  payload: string;
+  nextAttemptAt: number;
+}
+
+export interface WebhookDelivery extends WebhookDeliveryInput {
+  tenantId: string | null;
+  attempts: number;
+  status: WebhookDeliveryStatus;
+  /*
+   * OPERATOR ONLY, AND NEVER RETURNED TO AN API CALLER. Telling a caller that
+   * their webhook target answered 401 rather than timing out reports whether an
+   * internal port is open, which turns delivery into a blind SSRF oracle. If a
+   * delivery status endpoint is ever added it returns a coarse enum and these
+   * two fields stay here.
+   */
+  lastStatus: number | null;
+  lastError: string | null;
+  createdAt: number;
+  deliveredAt: number | null;
+}
+
+/* The outcome of one attempt, written back by the worker. */
+export interface WebhookAttemptResult {
+  status: WebhookDeliveryStatus;
+  attempts: number;
+  nextAttemptAt: number;
+  lastStatus?: number | null;
+  lastError?: string | null;
+  deliveredAt?: number | null;
+}
+
 export interface ProductFacts {
   url: string;
   title?: string;

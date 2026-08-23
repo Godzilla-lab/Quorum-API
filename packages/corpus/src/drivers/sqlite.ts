@@ -23,6 +23,9 @@ import { FUTURE_TOLERANCE_SECONDS, MIN_CREATED_UTC, WARM_MAX_AGE_DAYS, WARM_MIN_
 import type {
   AdObservation,
   AdObservationInput,
+  WebhookAttemptResult,
+  WebhookDelivery,
+  WebhookDeliveryInput,
   ByCategoryOptions,
   CategoryStats,
   DateHistogram,
@@ -140,6 +143,28 @@ export interface SqliteCorpusOptions {
   /* Unix seconds. Defaults to the system clock. Injected by tests. */
   now?: () => number;
 }
+
+interface DeliveryRow {
+  report_id: string; tenant_id: string | null; key_label: string; url: string;
+  payload: string; attempts: number; next_attempt_at: number; status: string;
+  last_status: number | null; last_error: string | null;
+  created_at: number; delivered_at: number | null;
+}
+
+const toDelivery = (r: DeliveryRow): WebhookDelivery => ({
+  reportId: r.report_id,
+  tenantId: r.tenant_id,
+  keyLabel: r.key_label,
+  url: r.url,
+  payload: r.payload,
+  attempts: r.attempts,
+  nextAttemptAt: r.next_attempt_at,
+  status: r.status as WebhookDelivery['status'],
+  lastStatus: r.last_status,
+  lastError: r.last_error,
+  createdAt: r.created_at,
+  deliveredAt: r.delivered_at,
+});
 
 export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
   const { path, now: nowSeconds = systemClock } = options;
@@ -513,11 +538,15 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       );
     },
 
-    async priorReports(category: string, limit = 3): Promise<PriorReport[]> {
+    async priorReports(category: string, limit = 3, tenantId?: string | null): Promise<PriorReport[]> {
+      /* IS NOT DISTINCT FROM, so NULL matches NULL. A plain `=` never matches a
+       * null tenant and would silently return nothing for the CLI. */
       const rows = db.prepare(`
         SELECT product_title, product_url, findings, created_at
-        FROM reports WHERE category = ? ORDER BY created_at DESC LIMIT ?
-      `).all(category, limit) as unknown as {
+        FROM reports
+        WHERE category = ? AND tenant_id IS NOT DISTINCT FROM ?
+        ORDER BY created_at DESC LIMIT ?
+      `).all(category, tenantId ?? null, limit) as unknown as {
         product_title: string | null; product_url: string;
         findings: string | null; created_at: number;
       }[];
@@ -532,6 +561,68 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
           createdAt: r.created_at,
         };
       });
+    },
+
+    /*
+     * ON CONFLICT DO NOTHING, because enqueueing must be idempotent. A report
+     * reaches a terminal state once, and if that ever happened twice the second
+     * must not produce a second delivery to a customer.
+     */
+    async enqueueDelivery(delivery: WebhookDeliveryInput): Promise<void> {
+      db.prepare(`
+        INSERT INTO webhook_deliveries
+          (report_id, tenant_id, key_label, url, payload, attempts, next_attempt_at, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, ?, 'pending', ?)
+        ON CONFLICT(report_id) DO NOTHING
+      `).run(
+        delivery.reportId,
+        delivery.tenantId ?? null,
+        delivery.keyLabel,
+        delivery.url,
+        delivery.payload,
+        delivery.nextAttemptAt,
+        nowSeconds(),
+      );
+    },
+
+    async dueDeliveries(now: number, limit = 20): Promise<WebhookDelivery[]> {
+      const rows = db.prepare(`
+        SELECT report_id, tenant_id, key_label, url, payload, attempts, next_attempt_at,
+               status, last_status, last_error, created_at, delivered_at
+        FROM webhook_deliveries
+        WHERE status = 'pending' AND next_attempt_at <= ?
+        ORDER BY next_attempt_at ASC
+        LIMIT ?
+      `).all(now, limit) as unknown as DeliveryRow[];
+      return rows.map(toDelivery);
+    },
+
+    async recordDeliveryAttempt(reportId: string, result: WebhookAttemptResult): Promise<void> {
+      db.prepare(`
+        UPDATE webhook_deliveries
+        SET attempts = ?, next_attempt_at = ?, status = ?,
+            last_status = ?, last_error = ?, delivered_at = ?
+        WHERE report_id = ?
+      `).run(
+        result.attempts,
+        result.nextAttemptAt,
+        result.status,
+        result.lastStatus ?? null,
+        result.lastError ?? null,
+        result.deliveredAt ?? null,
+        reportId,
+      );
+    },
+
+    /* Settled rows only. A pending delivery is never pruned, however old: the
+     * schedule runs to roughly 75 hours and an instance that slept through most
+     * of it must still find its work. */
+    async pruneDeliveries(before: number): Promise<number> {
+      const result = db.prepare(`
+        DELETE FROM webhook_deliveries
+        WHERE status != 'pending' AND created_at < ?
+      `).run(before);
+      return Number(result.changes);
     },
 
     async cacheProduct(facts: ProductFacts, category: string): Promise<void> {

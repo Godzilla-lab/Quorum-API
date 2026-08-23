@@ -32,6 +32,9 @@ import { FUTURE_TOLERANCE_SECONDS, MIN_CREATED_UTC, ageInDays, isWarm } from '..
 import type {
   AdObservation,
   AdObservationInput,
+  WebhookAttemptResult,
+  WebhookDelivery,
+  WebhookDeliveryInput,
   ByCategoryOptions,
   CategoryStats,
   DateHistogram,
@@ -134,6 +137,29 @@ function toAdObservation(r: AdRow): AdObservation {
     observedAt: num(r.observed_at),
   };
 }
+
+interface PgDeliveryRow {
+  report_id: string; tenant_id: string | null; key_label: string; url: string;
+  payload: string; attempts: unknown; next_attempt_at: unknown; status: string;
+  last_status: unknown; last_error: string | null;
+  created_at: unknown; delivered_at: unknown;
+}
+
+/* BIGINT arrives as a string from the client, hence num(). See its header. */
+const toDelivery = (r: PgDeliveryRow): WebhookDelivery => ({
+  reportId: r.report_id,
+  tenantId: r.tenant_id,
+  keyLabel: r.key_label,
+  url: r.url,
+  payload: r.payload,
+  attempts: num(r.attempts),
+  nextAttemptAt: num(r.next_attempt_at),
+  status: r.status as WebhookDelivery['status'],
+  lastStatus: r.last_status === null ? null : num(r.last_status),
+  lastError: r.last_error,
+  createdAt: num(r.created_at),
+  deliveredAt: r.delivered_at === null ? null : num(r.delivered_at),
+});
 
 export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver {
   const { sql, now: nowSeconds = systemClock } = options;
@@ -402,13 +428,16 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       );
     },
 
-    async priorReports(category: string, limit = 3): Promise<PriorReport[]> {
+    async priorReports(category: string, limit = 3, tenantId?: string | null): Promise<PriorReport[]> {
+      /* IS NOT DISTINCT FROM, so NULL matches NULL. See the driver interface. */
       const rows = await sql.query<{
         product_title: string | null; product_url: string; findings: unknown; created_at: unknown;
       }>(
         `SELECT product_title, product_url, findings, created_at
-         FROM reports WHERE category = $1 ORDER BY created_at DESC LIMIT $2`,
-        [category, limit],
+         FROM reports
+         WHERE category = $1 AND tenant_id IS NOT DISTINCT FROM $2
+         ORDER BY created_at DESC LIMIT $3`,
+        [category, tenantId ?? null, limit],
       );
       return rows.map((r) => ({
         productTitle: r.product_title ?? '',
@@ -416,6 +445,58 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
         findings: typeof r.findings === 'string' ? JSON.parse(r.findings) : (r.findings ?? {}),
         createdAt: num(r.created_at),
       }));
+    },
+
+    /* Idempotent on the report id, for the reason given in the SQLite driver. */
+    async enqueueDelivery(delivery: WebhookDeliveryInput): Promise<void> {
+      await sql.query(
+        `INSERT INTO webhook_deliveries
+           (report_id, tenant_id, key_label, url, payload, attempts, next_attempt_at, status, created_at)
+         VALUES ($1,$2,$3,$4,$5,0,$6,'pending',$7)
+         ON CONFLICT (report_id) DO NOTHING`,
+        [
+          delivery.reportId, delivery.tenantId ?? null, delivery.keyLabel,
+          delivery.url, delivery.payload, delivery.nextAttemptAt, nowSeconds(),
+        ],
+      );
+    },
+
+    async dueDeliveries(now: number, limit = 20): Promise<WebhookDelivery[]> {
+      const rows = await sql.query<PgDeliveryRow>(
+        `SELECT report_id, tenant_id, key_label, url, payload, attempts, next_attempt_at,
+                status, last_status, last_error, created_at, delivered_at
+         FROM webhook_deliveries
+         WHERE status = 'pending' AND next_attempt_at <= $1
+         ORDER BY next_attempt_at ASC
+         LIMIT $2`,
+        [now, limit],
+      );
+      return rows.map(toDelivery);
+    },
+
+    async recordDeliveryAttempt(reportId: string, result: WebhookAttemptResult): Promise<void> {
+      await sql.query(
+        `UPDATE webhook_deliveries
+         SET attempts = $1, next_attempt_at = $2, status = $3,
+             last_status = $4, last_error = $5, delivered_at = $6
+         WHERE report_id = $7`,
+        [
+          result.attempts, result.nextAttemptAt, result.status,
+          result.lastStatus ?? null, result.lastError ?? null,
+          result.deliveredAt ?? null, reportId,
+        ],
+      );
+    },
+
+    /* Settled rows only, for the reason given in the SQLite driver. */
+    async pruneDeliveries(before: number): Promise<number> {
+      const rows = await sql.query<{ report_id: string }>(
+        `DELETE FROM webhook_deliveries
+         WHERE status != 'pending' AND created_at < $1
+         RETURNING report_id`,
+        [before],
+      );
+      return rows.length;
     },
 
     async cacheProduct(facts: ProductFacts, category: string): Promise<void> {

@@ -81,7 +81,7 @@ if (!PG_URL) {
     await owner.exec(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     await owner.exec(`CREATE SCHEMA ${schema}`);
     await owner.exec(`SET search_path TO ${schema}`);
-    for (const file of ['001_initial.sql', '002_rls.sql']) {
+    for (const file of ['001_initial.sql', '002_rls.sql', '003_webhook_deliveries.sql']) {
       await owner.exec(readFileSync(join(MIGRATIONS, file), 'utf8'));
     }
 
@@ -232,13 +232,66 @@ if (!PG_URL) {
         );
       });
 
-      await t.test('reports is the only table carrying a tenant id', async () => {
+      /*
+       * WHY THIS ASSERTION CHANGED SHAPE ON 2026-08-23.
+       *
+       * It used to say "reports is the only table carrying a tenant id". That
+       * was true, and it was a proxy for the property that actually matters: a
+       * table holding one customer's data must not be readable by another. When
+       * `webhook_deliveries` arrived, holding a customer's callback url and
+       * their rendered report, the proxy stopped being true while the property
+       * it stood for was unchanged.
+       *
+       * Loosening it to "some tables carry a tenant id" would have thrown the
+       * guard away. So it is now two halves, and the second is the one with
+       * teeth:
+       *
+       *   1. The set of tenant owned tables is an explicit list, so adding one
+       *      is a deliberate edit to this file rather than a side effect of a
+       *      migration nobody read.
+       *   2. EVERY table in that set has row level security enabled AND a
+       *      policy attached. A tenant table with RLS on and no policy matches
+       *      nothing, and a tenant table with RLS off matches everything. The
+       *      second is the silent breach this file exists to prevent.
+       */
+      const TENANT_OWNED = ['reports', 'webhook_deliveries'];
+
+      await t.test('the tenant owned tables are exactly the expected set', async () => {
         const rows = await tenant.query(
           `SELECT table_name FROM information_schema.columns
-           WHERE table_schema = $1 AND column_name = 'tenant_id'`,
+           WHERE table_schema = $1 AND column_name = 'tenant_id'
+           ORDER BY table_name`,
           [schema],
         );
-        assert.deepEqual(rows.map((r) => r['table_name']), ['reports']);
+        assert.deepEqual(
+          rows.map((r) => r['table_name']),
+          TENANT_OWNED,
+          'a table gained or lost a tenant_id without this list being updated',
+        );
+      });
+
+      await t.test('every tenant owned table has row level security and a policy', async () => {
+        for (const table of TENANT_OWNED) {
+          const [enabled] = await owner.query<{ relrowsecurity: boolean }>(
+            `SELECT c.relrowsecurity FROM pg_class c
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = $1 AND c.relname = $2`,
+            [schema, table],
+          );
+          assert.equal(
+            enabled?.relrowsecurity, true,
+            `${table} holds tenant data with row level security DISABLED, so every row is readable by every tenant`,
+          );
+
+          const policies = await owner.query<{ policyname: string }>(
+            `SELECT policyname FROM pg_policies WHERE schemaname = $1 AND tablename = $2`,
+            [schema, table],
+          );
+          assert.ok(
+            policies.length > 0,
+            `${table} has row level security enabled and NO policy, so it matches nothing and fails closed silently`,
+          );
+        }
       });
 
       await t.test('the service role can write to the shared corpus', async () => {

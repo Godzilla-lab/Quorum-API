@@ -119,6 +119,36 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS reports_category_idx ON reports (category, created_at DESC);
 CREATE INDEX IF NOT EXISTS reports_tenant_idx   ON reports (tenant_id, created_at DESC);
 
+/*
+ * Webhook deliveries: TENANT OWNED, like reports and unlike everything else.
+ *
+ * One report has one delivery, so the report id is the key and is also the
+ * webhook-id header the receiver deduplicates on. The payload is stored rather
+ * than re-rendered because the job queue is in memory: after a restart there is
+ * nothing left to render from, which is the entire reason this table exists.
+ *
+ * last_status and last_error are for an operator reading the table. They must
+ * never be returned to an API caller, because the difference between "refused"
+ * and "timed out" reports whether an internal port is open.
+ */
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  report_id       TEXT PRIMARY KEY,      -- also the webhook-id header
+  tenant_id       TEXT,
+  key_label       TEXT NOT NULL,         -- selects the derived signing secret
+  url             TEXT NOT NULL,         -- credential shaped, never logged
+  payload         TEXT NOT NULL,         -- the exact bytes signed and sent
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  last_status     INTEGER,
+  last_error      TEXT,
+  created_at      INTEGER NOT NULL,
+  delivered_at    INTEGER
+);
+
+-- The only query the delivery worker makes.
+CREATE INDEX IF NOT EXISTS webhook_due_idx ON webhook_deliveries (status, next_attempt_at);
+
 -- Product resolution cache, so re-running a URL never re-pays the unlocker.
 CREATE TABLE IF NOT EXISTS products (
   url        TEXT PRIMARY KEY,

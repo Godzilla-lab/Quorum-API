@@ -35,6 +35,9 @@ import type {
   DateHistogramOptions,
   SearchOptions,
   SourceId,
+  WebhookAttemptResult,
+  WebhookDelivery,
+  WebhookDeliveryInput,
 } from './types.ts';
 
 export interface CorpusDriver {
@@ -102,7 +105,50 @@ export interface CorpusDriver {
   latestAdsByCategory(category: string, limit?: number): Promise<AdObservation[]>;
 
   saveReport(report: ReportInput): Promise<void>;
-  priorReports(category: string, limit?: number): Promise<PriorReport[]>;
+
+  /*
+   * Prior reports for a category, SCOPED TO ONE TENANT.
+   *
+   * `tenantId` is matched exactly, and undefined means the NULL tenant rather
+   * than every tenant. That choice is the whole security property: a caller who
+   * forgets to pass one sees the single user rows, never somebody else's, so
+   * forgetting fails closed instead of leaking.
+   *
+   * WHY THIS IS ENFORCED IN SQL AND NOT LEFT TO ROW LEVEL SECURITY. The
+   * policies in 002_rls.sql are real and they are also inert in production:
+   * measured 2026-08-23, the server connects as the table OWNER, and Postgres
+   * exempts an owner from RLS unless FORCE ROW LEVEL SECURITY is set, which it
+   * is not. SQLite has no equivalent at all. A boundary that depends on which
+   * role happens to connect is not a boundary, so the driver enforces it.
+   */
+  priorReports(category: string, limit?: number, tenantId?: string | null): Promise<PriorReport[]>;
+
+  /*
+   * The webhook delivery queue.
+   *
+   * WHY IT IS HERE AND NOT IN THE SERVER. The server's job queue is in memory,
+   * and a free tier instance sleeps. A delivery held only in the process is a
+   * delivery lost on the next redeploy, which makes a retry schedule
+   * decorative. `reports` already set the precedent that tenant owned server
+   * state lives in the corpus.
+   *
+   * Enqueueing is idempotent on the report id: a report reaches a terminal
+   * state once, and if that ever happened twice the second must not produce a
+   * second delivery.
+   */
+  enqueueDelivery(delivery: WebhookDeliveryInput): Promise<void>;
+
+  /* Pending rows whose next attempt is due, oldest first. The only query the
+   * delivery worker makes, and the reason for the (status, next_attempt_at)
+   * index. */
+  dueDeliveries(now: number, limit?: number): Promise<WebhookDelivery[]>;
+
+  /* Write back the outcome of one attempt. */
+  recordDeliveryAttempt(reportId: string, result: WebhookAttemptResult): Promise<void>;
+
+  /* Drop settled rows older than a cutoff, so the table does not grow without
+   * limit. Pending rows are never pruned. Returns the number removed. */
+  pruneDeliveries(before: number): Promise<number>;
 
   /* Product cache, so a repeat URL never re-pays for unblocking. */
   cacheProduct(facts: ProductFacts, category: string): Promise<void>;

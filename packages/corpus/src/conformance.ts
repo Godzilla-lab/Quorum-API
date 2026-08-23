@@ -18,7 +18,7 @@ import { test } from 'node:test';
 import type { CorpusDriver } from './driver.ts';
 import { MIN_RECEIPTS, WARM_MIN_DOCS } from './constants.ts';
 import { receiptId } from './receipt-id.ts';
-import type { AdObservationInput, DocInput } from './types.ts';
+import type { AdObservationInput, DocInput, WebhookDeliveryInput } from './types.ts';
 
 const doc = (over: Partial<DocInput> = {}): DocInput => ({
   source: 'reddit',
@@ -585,6 +585,248 @@ export function runConformanceSuite(
       assert.equal(written, 2);
       const [obs] = await c.adObservations('ad_nul');
       assert.equal(obs?.body, 'buy now');
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* the tenant boundary on reports                                    */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * WHY THESE ARE IN THE SHARED SUITE AND NOT ONLY IN THE RLS TEST.
+   *
+   * `reports` has carried an RLS policy since 002_rls.sql, and measured
+   * 2026-08-23 that policy is INERT in production: the server connects as the
+   * table owner, and Postgres exempts an owner from RLS unless FORCE ROW LEVEL
+   * SECURITY is set, which it is not. SQLite has no equivalent at all. So the
+   * boundary has to hold in the driver, on both drivers, or it does not hold.
+   */
+  test(`${driverName}: a tenant sees only its own prior reports`, async () => {
+    await withCorpus(async (c) => {
+      await c.saveReport({ tenantId: 'tenant-a', productUrl: 'https://a.example', productTitle: 'A', category: 'running shoes', markdown: '', findings: { owner: 'a' } });
+      await c.saveReport({ tenantId: 'tenant-b', productUrl: 'https://b.example', productTitle: 'B', category: 'running shoes', markdown: '', findings: { owner: 'b' } });
+
+      const a = await c.priorReports('running shoes', 10, 'tenant-a');
+      assert.equal(a.length, 1, 'tenant a must not see tenant b');
+      assert.deepEqual(a[0]?.findings, { owner: 'a' });
+
+      const b = await c.priorReports('running shoes', 10, 'tenant-b');
+      assert.equal(b.length, 1, 'tenant b must not see tenant a');
+      assert.deepEqual(b[0]?.findings, { owner: 'b' });
+    });
+  });
+
+  /*
+   * THE FAIL CLOSED CASE, which is the one that matters. Forgetting to pass a
+   * tenant must show the single user rows, never everybody's. If undefined
+   * meant "no filter" then every future call site that forgot would leak, and
+   * they would all look correct in review.
+   */
+  test(`${driverName}: omitting the tenant sees the null tenant, not every tenant`, async () => {
+    await withCorpus(async (c) => {
+      await c.saveReport({ tenantId: 'tenant-a', productUrl: 'https://a.example', category: 'running shoes', markdown: '', findings: { owner: 'a' } });
+      await c.saveReport({ productUrl: 'https://cli.example', category: 'running shoes', markdown: '', findings: { owner: 'cli' } });
+
+      const unscoped = await c.priorReports('running shoes', 10);
+      assert.equal(unscoped.length, 1, 'an omitted tenant must not return another tenant rows');
+      assert.deepEqual(unscoped[0]?.findings, { owner: 'cli' });
+
+      /* And explicitly asking for the null tenant is the same thing. */
+      assert.deepEqual(await c.priorReports('running shoes', 10, null), unscoped);
+    });
+  });
+
+  /* The CLI writes no tenant at all, and must keep working exactly as before. */
+  test(`${driverName}: a single user corpus is unaffected by the tenant scope`, async () => {
+    await withCorpus(async (c) => {
+      await c.saveReport({ productUrl: 'https://one.example', productTitle: 'One', category: 'running shoes', markdown: '', findings: { n: 1 } });
+      await c.saveReport({ productUrl: 'https://two.example', productTitle: 'Two', category: 'running shoes', markdown: '', findings: { n: 2 } });
+      const prior = await c.priorReports('running shoes', 10);
+      assert.equal(prior.length, 2);
+    });
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* the webhook delivery queue                                        */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * A delivery to enqueue. `nextAttemptAt` defaults to the clock's start so a
+   * test that does not care about scheduling gets a row that is immediately
+   * due.
+   */
+  const delivery = (over: Partial<WebhookDeliveryInput> = {}): WebhookDeliveryInput => ({
+    reportId: 'rep_0000000000000001',
+    tenantId: 'tenant-a',
+    keyLabel: 'key-1',
+    url: 'https://receiver.example/hook',
+    payload: '{"id":"rep_0000000000000001"}',
+    nextAttemptAt: 1_700_000_000,
+    ...over,
+  });
+
+  test(`${driverName}: a delivery round trips with every field intact`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery());
+      const [due] = await c.dueDeliveries(clock.now());
+      assert.equal(due?.reportId, 'rep_0000000000000001');
+      assert.equal(due?.tenantId, 'tenant-a');
+      assert.equal(due?.keyLabel, 'key-1');
+      assert.equal(due?.url, 'https://receiver.example/hook');
+      assert.equal(due?.payload, '{"id":"rep_0000000000000001"}');
+      assert.equal(due?.attempts, 0);
+      assert.equal(due?.status, 'pending');
+      assert.equal(due?.lastStatus, null);
+      assert.equal(due?.lastError, null);
+      assert.equal(due?.deliveredAt, null);
+      assert.equal(due?.createdAt, clock.now());
+    });
+  });
+
+  /*
+   * The property that makes the queue safe to call from a terminal path: a
+   * report that somehow finishes twice must not deliver twice, because the
+   * second delivery is a duplicate POST to a customer.
+   */
+  test(`${driverName}: enqueueing the same report twice yields one delivery`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery());
+      await c.enqueueDelivery(delivery({ url: 'https://elsewhere.example/hook' }));
+      const due = await c.dueDeliveries(clock.now());
+      assert.equal(due.length, 1);
+      assert.equal(due[0]?.url, 'https://receiver.example/hook', 'the first enqueue wins, the second is ignored');
+    });
+  });
+
+  /* A row that is not due yet must not be handed out early, or the schedule
+   * this table exists to hold is not a schedule. */
+  test(`${driverName}: a delivery is invisible until its next attempt falls due`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery({ nextAttemptAt: clock.now() + 300 }));
+      assert.equal((await c.dueDeliveries(clock.now())).length, 0);
+      clock.advanceSeconds(299);
+      assert.equal((await c.dueDeliveries(clock.now())).length, 0);
+      clock.advanceSeconds(1);
+      assert.equal((await c.dueDeliveries(clock.now())).length, 1, 'due at exactly the appointed second');
+    });
+  });
+
+  test(`${driverName}: due deliveries come back oldest first and respect the limit`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery({ reportId: 'rep_000000000000000c', nextAttemptAt: clock.now() + 20 }));
+      await c.enqueueDelivery(delivery({ reportId: 'rep_000000000000000a', nextAttemptAt: clock.now() }));
+      await c.enqueueDelivery(delivery({ reportId: 'rep_000000000000000b', nextAttemptAt: clock.now() + 10 }));
+      clock.advanceSeconds(60);
+
+      const all = await c.dueDeliveries(clock.now());
+      assert.deepEqual(all.map((d) => d.reportId), [
+        'rep_000000000000000a', 'rep_000000000000000b', 'rep_000000000000000c',
+      ]);
+      assert.equal((await c.dueDeliveries(clock.now(), 2)).length, 2);
+    });
+  });
+
+  /* A failed attempt goes back in the queue at its new time, carrying what
+   * happened, and does not come back before then. */
+  test(`${driverName}: a failed attempt is rescheduled and its outcome recorded`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery());
+      await c.recordDeliveryAttempt('rep_0000000000000001', {
+        status: 'pending',
+        attempts: 1,
+        nextAttemptAt: clock.now() + 5,
+        lastStatus: 500,
+        lastError: 'receiver returned 500',
+      });
+
+      assert.equal((await c.dueDeliveries(clock.now())).length, 0, 'not due again yet');
+      clock.advanceSeconds(5);
+      const [retry] = await c.dueDeliveries(clock.now());
+      assert.equal(retry?.attempts, 1);
+      assert.equal(retry?.status, 'pending');
+      assert.equal(retry?.lastStatus, 500);
+      assert.equal(retry?.lastError, 'receiver returned 500');
+      assert.equal(retry?.deliveredAt, null);
+    });
+  });
+
+  /* THE ONE THAT MATTERS. A delivered row must never be handed out again,
+   * whatever the clock does, because that is a duplicate POST to a customer. */
+  test(`${driverName}: a delivered delivery never becomes due again`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery());
+      await c.recordDeliveryAttempt('rep_0000000000000001', {
+        status: 'delivered',
+        attempts: 1,
+        nextAttemptAt: clock.now(),
+        lastStatus: 200,
+        deliveredAt: clock.now(),
+      });
+      clock.advanceDays(30);
+      assert.deepEqual(await c.dueDeliveries(clock.now()), []);
+    });
+  });
+
+  test(`${driverName}: an exhausted delivery never becomes due again either`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery());
+      await c.recordDeliveryAttempt('rep_0000000000000001', {
+        status: 'exhausted',
+        attempts: 10,
+        nextAttemptAt: clock.now(),
+        lastError: 'gave up after 10 attempts',
+      });
+      clock.advanceDays(30);
+      assert.deepEqual(await c.dueDeliveries(clock.now()), []);
+    });
+  });
+
+  /*
+   * Pruning keeps the table bounded, and the rule it must not break is that a
+   * pending row is never dropped however old. The schedule runs to roughly 75
+   * hours, so an instance that slept through most of it must still find its
+   * work when it wakes.
+   */
+  test(`${driverName}: pruning removes settled rows and never a pending one`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery({ reportId: 'rep_00000000000000d1' }));
+      await c.enqueueDelivery(delivery({ reportId: 'rep_00000000000000d2' }));
+      await c.enqueueDelivery(delivery({ reportId: 'rep_00000000000000p1' }));
+      await c.recordDeliveryAttempt('rep_00000000000000d1', {
+        status: 'delivered', attempts: 1, nextAttemptAt: clock.now(), deliveredAt: clock.now(),
+      });
+      await c.recordDeliveryAttempt('rep_00000000000000d2', {
+        status: 'exhausted', attempts: 10, nextAttemptAt: clock.now(),
+      });
+
+      clock.advanceDays(30);
+      const removed = await c.pruneDeliveries(clock.now());
+      assert.equal(removed, 2, 'both settled rows go');
+
+      const stillPending = await c.dueDeliveries(clock.now());
+      assert.equal(stillPending.length, 1);
+      assert.equal(stillPending[0]?.reportId, 'rep_00000000000000p1', 'a pending row survives any age');
+    });
+  });
+
+  test(`${driverName}: pruning leaves a settled row that is newer than the cutoff`, async () => {
+    await withClock(async (c, clock) => {
+      await c.enqueueDelivery(delivery());
+      await c.recordDeliveryAttempt('rep_0000000000000001', {
+        status: 'delivered', attempts: 1, nextAttemptAt: clock.now(), deliveredAt: clock.now(),
+      });
+      assert.equal(await c.pruneDeliveries(clock.now() - 1), 0);
+    });
+  });
+
+  test(`${driverName}: an empty queue is empty rather than throwing`, async () => {
+    await withCorpus(async (c) => {
+      assert.deepEqual(await c.dueDeliveries(2_000_000_000), []);
+      assert.equal(await c.pruneDeliveries(2_000_000_000), 0);
+      /* Recording against a row that is not there is a no op, not a crash. */
+      await c.recordDeliveryAttempt('rep_00000000000000ff', {
+        status: 'delivered', attempts: 1, nextAttemptAt: 0,
+      });
     });
   });
 

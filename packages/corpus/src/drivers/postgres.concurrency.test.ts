@@ -83,7 +83,7 @@ if (!PG_URL) {
     await owner.exec(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     await owner.exec(`CREATE SCHEMA ${schema}`);
     await owner.exec(`SET search_path TO ${schema}`);
-    for (const file of ['001_initial.sql', '002_rls.sql']) {
+    for (const file of ['001_initial.sql', '002_rls.sql', '003_webhook_deliveries.sql']) {
       await owner.exec(readFileSync(join(MIGRATIONS, file), 'utf8'));
     }
 
