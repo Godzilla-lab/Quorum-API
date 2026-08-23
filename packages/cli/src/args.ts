@@ -57,6 +57,15 @@ export const DEFAULT_TERMS = ['quality', 'price', 'problems'];
 export const DEFAULT_CORPUS_PATH = './quorum.db';
 
 export interface CliOptions {
+  /*
+   * Who this run belongs to. Never set by the CLI parser, because a local run
+   * has one user and its reports are the NULL tenant.
+   *
+   * The hosted server sets it to the calling key's label, which is what stops
+   * one customer's report becoming the baseline the next customer's diff is
+   * computed against. See `priorReports` on the corpus driver.
+   */
+  tenantId?: string | null;
   subject: string;
   terms: string[];
   /* Name hints for finding communities. A different thing from terms, and

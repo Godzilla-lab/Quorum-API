@@ -15,6 +15,7 @@
  * the process instead would leave the same records written and no summary.
  */
 
+import { realpathSync } from 'node:fs';
 import process from 'node:process';
 import { findProductByName, makeAdSource, makeSource, resolveSubject } from '@quorum/sources';
 import { askClaimsLive, expandSubjectLive, readImageLive } from '@quorum/llm';
@@ -175,7 +176,27 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
-/* Only when run directly, so importing this file for a test starts nothing. */
-if (process.argv[1] && import.meta.filename === process.argv[1]) {
+/*
+ * Only when run directly, so importing this file for a test starts nothing.
+ *
+ * BOTH SIDES ARE RESOLVED THROUGH realpath, AND THAT IS NOT A NICETY.
+ *
+ * npm installs a bin as a SYMLINK: node_modules/.bin/quorum points at
+ * packages/cli/src/bin.ts. So when anybody runs the documented command,
+ * `process.argv[1]` is the symlink and `import.meta.filename` is the real file,
+ * and comparing them directly never matches. The CLI then started nothing,
+ * printed nothing, and exited 0, which looks like success.
+ *
+ * MEASURED 2026-08-23 by running the README's own quickstart in a clean
+ * checkout: `npx quorum "running shoes" --offline` produced zero bytes on both
+ * streams. Every `npx quorum` example in the README was broken, and running the
+ * file by path worked perfectly, which is why it survived so long: that is how
+ * it always got tested.
+ */
+const sameFile = (a: string, b: string): boolean => {
+  try { return realpathSync(a) === realpathSync(b); } catch { return false; }
+};
+
+if (process.argv[1] && sameFile(process.argv[1], import.meta.filename)) {
   process.exitCode = await main(process.argv.slice(2));
 }

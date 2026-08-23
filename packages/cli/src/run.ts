@@ -764,7 +764,11 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
     });
 
     let diff: ReportDiff | null = null;
-    const [mostRecent] = await corpus.priorReports(category, 1);
+    /* SCOPED TO THIS RUN'S TENANT. Unscoped, the hosted server diffed one
+     * caller's report against whichever caller last ran the same category,
+     * so a customer's first ever report announced what had "changed" since a
+     * run that was never theirs. */
+    const [mostRecent] = await corpus.priorReports(category, 1, options.tenantId);
     if (mostRecent) {
       const previous = parseSnapshot(mostRecent.findings);
       /* A snapshot written by an older build, or half written by a run that
@@ -784,6 +788,7 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
      */
     if (!options.offline && !options.asOf) {
       await corpus.saveReport({
+        tenantId: options.tenantId ?? null,
         productUrl: resolvedSubject.url ?? options.subject,
         productTitle: resolvedSubject.title,
         category,
