@@ -1,4 +1,4 @@
-# Receipts
+# Quorum
 
 **Market evidence with receipts.** Give it a product URL, get back what a market
 actually says: voice of customer from public archives, competitor ads ranked by
@@ -70,11 +70,19 @@ which matters because four of four real store pages blocked a server side fetch
 when this was measured.
 
 ```bash
-npx receipts "running shoes" --communities running,runningshoegeeks
-npx receipts "https://allbirds.com/products/mens-wool-runners"
-npx receipts "running shoes" --offline      # corpus only, no network, no cost
-npx receipts "running shoes" --json | jq    # progress goes to stderr
+npx quorum "running shoes" --communities running,runningshoegeeks
+npx quorum "https://allbirds.com/products/mens-wool-runners"
+npx quorum "running shoes" --offline      # corpus only, no network, no cost
+npx quorum "running shoes" --json | jq    # progress goes to stderr
+npx quorum "wool runner" --compare "brooks ghost"   # versus what
 ```
+
+`--compare` is one full retrieval per rival, and it has to be. Counting records
+in one corpus that happen to mention a rival measures co-occurrence: a comment
+saying "these run smaller than my Brooks" names a rival and a complaint and
+attributes the complaint to neither. So every side is a corpus of its own,
+shares are compared rather than counts, and a gap inside the sampling noise for
+those corpus sizes is reported as no difference rather than as a result.
 
 Every claim it prints is either a **finding**, meaning at least three
 independent receipts stand behind it, or a **weak signal**, which is shown so it
@@ -82,7 +90,7 @@ can be chased and is never stated as a market pattern. Before anything is
 printed, every cited receipt is fetched back out of the corpus, and the run
 exits non zero if one of them does not resolve.
 
-`receipts --help` lists the flags. The API contract is in `spec/`.
+`quorum --help` lists the flags. The API contract is in `spec/`.
 
 ## How it is licensed
 

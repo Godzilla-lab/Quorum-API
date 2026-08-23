@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { DateHistogram } from '@receipts/corpus';
+import type { DateHistogram } from '@quorum/corpus';
 import {
   MIN_WINDOW_RECORDS, monthsWindow, notableTrends, shareOfVoice, trendFor,
 } from './trend.ts';

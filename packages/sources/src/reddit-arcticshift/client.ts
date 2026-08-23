@@ -29,7 +29,7 @@ export const BASE = 'https://arctic-shift.photon-reddit.com/api';
  * volunteer, and being identifiable is the difference between someone emailing
  * us and someone blocking us.
  */
-export const USER_AGENT = 'receipts/0.1 (+https://github.com/receipts)';
+export const USER_AGENT = 'quorum/0.1 (+https://github.com/quorum)';
 
 export const POST_FIELDS = 'id,title,selftext,score,num_comments,subreddit,created_utc';
 export const SUB_FIELDS = 'display_name,subscribers,public_description,over18';

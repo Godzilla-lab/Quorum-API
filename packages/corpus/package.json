@@ -1,5 +1,5 @@
 {
-  "name": "@receipts/corpus",
+  "name": "@quorum/corpus",
   "version": "0.0.0",
   "private": true,
   "type": "module",

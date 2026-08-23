@@ -6,8 +6,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { corroborate, fabricationReport, shareOfVoice, trendFor, withEvidence, type ResolvedClaim, type SynthesisReport } from '@receipts/core';
-import type { Doc } from '@receipts/corpus';
+import { compareSides, corroborate, fabricationReport, shareOfVoice, trendFor, withEvidence, type ResolvedClaim, type SynthesisReport } from '@quorum/core';
+import type { Doc } from '@quorum/corpus';
 import { renderJson, renderText } from './render.ts';
 import type { RunResult } from './run.ts';
 
@@ -66,6 +66,7 @@ function result(over: Partial<RunResult> = {}): RunResult {
     themes: [],
     asOf: null,
     diff: null,
+    comparison: null,
     synthesis: null,
     warmth: {
       category: 'running shoes', docs: 340, comments: 320, channels: 11,
@@ -619,4 +620,69 @@ test('json carries every trend with its window and its noise floor', () => {
   assert.equal(parsed.trends[0]?.recent.total, 900);
   assert.ok(parsed.trends[0]!.noisePp > 0, 'the floor travels with the verdict');
   assert.deepEqual(parsed.voice[0], { term: 'quality', records: 3, categoryRecords: 40, sharePct: 7.5, rank: 1 });
+});
+
+/* ------------------------------------------------------------------ */
+/* versus what                                                         */
+/* ------------------------------------------------------------------ */
+
+const compareDocs = (term: string, n: number) =>
+  Array.from({ length: n }, (_, i) => doc(`rc_${term}_${i}`, `r/c${i}`));
+
+const comparison = (aRecords: number, aCorpus: number, bRecords: number, bCorpus: number) =>
+  compareSides([
+    { subject: 'wool runner', category: 'wool runner', corpusRecords: aCorpus, claims: [corroborate('sizing', compareDocs('a', aRecords))] },
+    { subject: 'brooks ghost', category: 'brooks ghost', corpusRecords: bCorpus, claims: [corroborate('sizing', compareDocs('b', bRecords))] },
+  ], ['sizing']);
+
+test('THE SHARE IS PRINTED AND THE COUNT IS PRINTED AS ITS WORKING', () => {
+  /*
+   * A reader shown two counts side by side compares them whatever the caption
+   * says, and across corpora of different depths that comparison is about how
+   * hard we looked rather than about the products.
+   */
+  const text = renderText(result({ comparison: comparison(45, 300, 6, 300) }));
+
+  assert.match(text, /VERSUS/);
+  assert.match(text, /LOUDER FOR wool runner/);
+  assert.match(text, /wool runner\s+15\.0%\s+45 of 300 records/);
+  assert.match(text, /brooks ghost\s+2\.0%\s+6 of 300 records/);
+  assert.match(text, /each retrieved as a corpus of its own/);
+});
+
+test('A TERM WE DECLINE TO CALL PRINTS THE REASON, NEVER A BLANK', () => {
+  /* A reader who sees nothing assumes we found nothing. */
+  const text = renderText(result({ comparison: comparison(4, 50, 4, 60) }));
+  assert.match(text, /no call/);
+  assert.match(text, /noise floor/);
+  assert.doesNotMatch(text, /LOUDER FOR/);
+});
+
+test('a side we hold almost nothing for is called out rather than ranked', () => {
+  const text = renderText(result({ comparison: comparison(40, 400, 1, 12) }));
+  assert.match(text, /too little held to compare at all:/);
+  assert.match(text, /brooks ghost\s+12 records/);
+});
+
+test('a rival that could not be retrieved is named in the report', () => {
+  const c = compareSides(
+    [{ subject: 'wool runner', category: 'wool runner', corpusRecords: 300, claims: [corroborate('sizing', compareDocs('a', 45))] }],
+    ['sizing'],
+    [{ subject: 'brooks ghost', reason: 'resolver timed out' }],
+  );
+  const text = renderText(result({ comparison: c }));
+  assert.match(text, /asked for and not retrieved:/);
+  assert.match(text, /brooks ghost\s+resolver timed out/);
+});
+
+test('no comparison prints no versus block at all', () => {
+  assert.doesNotMatch(renderText(result()), /VERSUS/);
+});
+
+test('the json carries the comparison, reasons included', () => {
+  const parsed = JSON.parse(renderJson(result({ comparison: comparison(45, 300, 6, 300) })));
+  assert.equal(parsed.comparison.baseline, 'wool runner');
+  assert.equal(parsed.comparison.terms[0].louder, 'wool runner');
+  assert.ok(parsed.comparison.terms[0].reason.length > 0);
+  assert.equal(JSON.parse(renderJson(result())).comparison, null);
 });

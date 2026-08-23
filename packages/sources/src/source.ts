@@ -10,7 +10,7 @@
  * Success criterion: adding a source touches only its own directory.
  */
 
-import type { DocInput, SourceId } from '@receipts/corpus';
+import type { DocInput, SourceId } from '@quorum/corpus';
 
 /*
  * Environment, passed rather than read from process.env.

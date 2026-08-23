@@ -13,9 +13,9 @@
  * No em dashes or en dashes, here or anywhere. `npm run lint:copy` enforces it.
  */
 
-import { isNotable, notableTrends } from '@receipts/core';
-import type { Corroboration, SourceOutcome } from '@receipts/core';
-import type { ScoreKind } from '@receipts/corpus/tiers';
+import { isNotable, notableTrends } from '@quorum/core';
+import type { Corroboration, SourceOutcome } from '@quorum/core';
+import type { ScoreKind } from '@quorum/corpus/tiers';
 import type { RunResult } from './run.ts';
 
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1)}s`;
@@ -486,6 +486,58 @@ export function renderText(result: RunResult): string {
   }
 
   /*
+   * VERSUS WHAT.
+   *
+   * EVERY LINE HERE IS A SHARE, AND THE COUNTS ARE PRINTED ONLY AS WORKING.
+   * Fourteen complaints against six is a statement about how hard we looked in
+   * each place, and a reader shown two counts side by side will compare them
+   * whatever the caption says. So the share leads and the count follows it in
+   * the same line, where it reads as the arithmetic rather than the answer.
+   *
+   * A term we cannot call prints the reason instead of a blank, because a
+   * reader who sees nothing assumes we found nothing.
+   */
+  if (result.comparison) {
+    const c = result.comparison;
+    out.push(`VERSUS    ${c.baseline} against ${c.terms[0]?.sides.length ? c.terms[0].sides.length - 1 : 0} rival${c.terms[0]?.sides.length === 2 ? '' : 's'}`);
+    out.push('          each retrieved as a corpus of its own, so no number here is co-occurrence');
+    out.push('');
+
+    for (const term of c.terms) {
+      out.push(`  ${pad(term.term, 12)}${term.louder ? `LOUDER FOR ${term.louder}` : 'no call'}`);
+      for (const side of term.sides) {
+        const share = side.corpusRecords ? `${side.sharePct.toFixed(1)}%` : 'n/a';
+        const working = side.verdict === 'no-records'
+          ? 'no records held'
+          : `${side.records} of ${side.corpusRecords} records, ${side.channels} channels, ${side.verdict}`;
+        out.push(`              ${pad(side.subject, 20)}${pad(share, 8)}${working}`);
+        /* One id per side, so a reader can fetch the thing being compared back
+         * rather than taking the percentage on trust. */
+        if (side.sampleReceiptIds[0]) {
+          out.push(`              ${pad('', 20)}${pad('', 8)}e.g. ${side.sampleReceiptIds[0]}`);
+        }
+      }
+      out.push(`              ${term.reason}`);
+      out.push('');
+    }
+
+    if (c.thinSides.length) {
+      out.push('  too little held to compare at all:');
+      for (const t of c.thinSides) {
+        out.push(`    ${pad(t.subject, 20)}${t.corpusRecords} records. Run it again to warm it.`);
+      }
+      out.push('');
+    }
+    if (c.unavailable.length) {
+      /* Named rather than dropped. A side missing in silence looks exactly like
+       * a side that had nothing to say. */
+      out.push('  asked for and not retrieved:');
+      for (const u of c.unavailable) out.push(`    ${pad(u.subject, 20)}${u.reason}`);
+      out.push('');
+    }
+  }
+
+  /*
    * WHAT THE MARKET RAISED THAT NOBODY ASKED ABOUT.
    *
    * PRINTED AS TOPICS, NEVER AS FINDINGS, AND THE WORDING IS THE WHOLE POINT.
@@ -844,6 +896,13 @@ export function renderJson(result: RunResult): string {
      * and `newReceiptIds` names what to read.
      */
     diff: result.diff,
+    /*
+     * Versus what, or null unless --compare was passed. Every side is its own
+     * corpus, `louder` is null wherever we decline to call it, and `reason`
+     * always says why. A consumer reading only `sides` and ranking on
+     * `sharePct` would be reproducing the call we refused to make.
+     */
+    comparison: result.comparison,
     /* Where attested and voice evidence disagree, and what nobody attested to. */
     gaps: result.gaps,
     silence: result.silence,

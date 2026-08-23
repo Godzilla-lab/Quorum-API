@@ -25,8 +25,8 @@
  * runnable in somebody else's CI against output we did not produce.
  */
 
-import type { CorpusDriver } from '@receipts/corpus';
-import { fabricationReport, resolveCitations, type FabricationReport, type ModelClaim } from '@receipts/core';
+import type { CorpusDriver } from '@quorum/corpus';
+import { fabricationReport, resolveCitations, type FabricationReport, type ModelClaim } from '@quorum/core';
 
 export interface VerifyInput {
   claims: ModelClaim[];

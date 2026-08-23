@@ -37,7 +37,7 @@
  * The SEC requires a User-Agent naming who is calling and how to reach them,
  * and returns 403 without one. That is a reasonable request from a public
  * archive, so this source reports itself unconfigured until
- * `RECEIPTS_CONTACT_EMAIL` is set, exactly like a missing API key.
+ * `QUORUM_CONTACT_EMAIL` is set, exactly like a missing API key.
  */
 
 import type { Citation, Ctx, Env, PlanInput, Query, Source, SourceRecord } from '../source.ts';
@@ -218,7 +218,7 @@ export function createSecEdgarSource(options: SecEdgarOptions = {}): Source {
 
   const headers = (): Record<string, string> => ({
     /* The format the SEC documents: who is calling and how to reach them. */
-    'user-agent': `Receipts ${contact}`,
+    'user-agent': `Quorum ${contact}`,
     accept: 'application/json',
   });
 
@@ -234,7 +234,7 @@ export function createSecEdgarSource(options: SecEdgarOptions = {}): Source {
      * than sending a request the archive has asked us not to send.
      */
     configured(env: Env): boolean {
-      return Boolean(env['RECEIPTS_CONTACT_EMAIL']);
+      return Boolean(env['QUORUM_CONTACT_EMAIL']);
     },
 
     async plan(input: PlanInput): Promise<Query[]> {
@@ -249,7 +249,7 @@ export function createSecEdgarSource(options: SecEdgarOptions = {}): Source {
     },
 
     async *retrieve(query: Query, ctx: Ctx): AsyncIterable<SourceRecord> {
-      contact = ctx.env['RECEIPTS_CONTACT_EMAIL'] ?? '';
+      contact = ctx.env['QUORUM_CONTACT_EMAIL'] ?? '';
       if (!contact) return;
 
       const form = (query as Query & { form?: string }).form ?? '10-K';
@@ -281,7 +281,7 @@ export function createSecEdgarSource(options: SecEdgarOptions = {}): Source {
          * it the record would carry our summary rather than the filer's words.
          */
         const doc = await throttle.attempt(
-          () => fetchImpl(url, { ...base, maxBytes: MAX_FILING_BYTES, headers: { 'user-agent': `Receipts ${contact}` } }),
+          () => fetchImpl(url, { ...base, maxBytes: MAX_FILING_BYTES, headers: { 'user-agent': `Quorum ${contact}` } }),
           (r) => r.status === 429 || r.status >= 500,
           { ok: false, status: 0, headers: {}, body: '', url, error: 'gave up after retries' },
         );

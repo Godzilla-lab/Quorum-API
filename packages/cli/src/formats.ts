@@ -63,8 +63,14 @@ const csvRow = (cells: readonly (string | number | boolean | null | undefined)[]
  * consumer has to be able to filter before it parses the rest.
  */
 export interface FlatRow {
-  kind: 'evidence' | 'claim' | 'theme' | 'trend' | 'attested';
+  kind: 'evidence' | 'claim' | 'theme' | 'trend' | 'attested' | 'comparison';
   category: string;
+  /*
+   * WHICH SIDE THE ROW IS ABOUT. The subject for every ordinary row, and the
+   * rival for a comparison row. Here so a warehouse can union many runs and
+   * group by product, which is the first thing anybody does with this.
+   */
+  subject: string;
   term: string;
   verdict: string;
   records: number;
@@ -76,6 +82,13 @@ export interface FlatRow {
   url: string;
   createdUtc: number;
   excerpt: string;
+  /*
+   * The denominator behind `records`, so a share is derivable exactly rather
+   * than shipped as a second number that can disagree with the first. On a
+   * comparison row it is that side's own corpus, which is the only denominator
+   * its count means anything against.
+   */
+  corpusRecords: number;
 }
 
 /*
@@ -88,10 +101,11 @@ export interface FlatRow {
  * line for some rows and not others. Building each row explicitly costs one
  * function and removes the entire class of problem.
  */
-function row(kind: FlatRow['kind'], category: string, over: Partial<FlatRow> = {}): FlatRow {
+function row(kind: FlatRow['kind'], category: string, subject: string, over: Partial<FlatRow> = {}): FlatRow {
   return {
     kind,
-    category,
+    category: over.category ?? category,
+    subject: over.subject ?? subject,
     term: over.term ?? '',
     verdict: over.verdict ?? '',
     records: over.records ?? 0,
@@ -103,24 +117,31 @@ function row(kind: FlatRow['kind'], category: string, over: Partial<FlatRow> = {
     url: over.url ?? '',
     createdUtc: over.createdUtc ?? 0,
     excerpt: over.excerpt ?? '',
+    corpusRecords: over.corpusRecords ?? 0,
   };
 }
 
 export function flatRows(result: RunResult): FlatRow[] {
   const rows: FlatRow[] = [];
   const category = result.category;
+  const subject = result.subject.title || category;
+  /* The same denominator the share of voice block used, so a share derived from
+   * these rows equals the one the report printed. */
+  const corpusRecords = result.voice[0]?.categoryRecords ?? result.warmth.docs;
+  const line = (kind: FlatRow['kind'], over: Partial<FlatRow> = {}) =>
+    row(kind, category, subject, { corpusRecords, ...over });
 
   for (const claim of result.claims) {
     /* The claim itself, so a consumer that only wants the counts does not have
      * to derive them and risk deriving them differently. */
-    rows.push(row('claim', category, {
+    rows.push(line('claim', {
       term: claim.term, verdict: claim.verdict,
       records: claim.records, channels: claim.channels,
     }));
     /* Then one row per receipt that was actually shown, carrying its claim's
      * verdict so the rows regroup to the counts above. */
     for (const e of claim.evidence) {
-      rows.push(row('evidence', category, {
+      rows.push(line('evidence', {
         term: claim.term, verdict: claim.verdict,
         records: claim.records, channels: claim.channels,
         receiptId: e.receiptId, source: e.source, channel: e.channel,
@@ -130,7 +151,7 @@ export function flatRows(result: RunResult): FlatRow[] {
   }
 
   for (const e of result.attested?.evidence ?? []) {
-    rows.push(row('attested', category, {
+    rows.push(line('attested', {
       verdict: result.attested?.corroboration.verdict ?? '',
       records: result.attested?.records ?? 0,
       receiptId: e.receiptId, source: e.source, channel: e.channel,
@@ -139,7 +160,7 @@ export function flatRows(result: RunResult): FlatRow[] {
   }
 
   for (const theme of result.themes) {
-    rows.push(row('theme', category, {
+    rows.push(line('theme', {
       term: theme.phrase, verdict: theme.corroboration.verdict,
       records: theme.records, channels: theme.channels,
       receiptId: theme.receiptIds[0] ?? '',
@@ -147,11 +168,37 @@ export function flatRows(result: RunResult): FlatRow[] {
   }
 
   for (const trend of result.trends) {
-    rows.push(row('trend', category, {
+    rows.push(line('trend', {
       term: trend.term, verdict: trend.direction,
       records: trend.recent.records, channels: trend.recent.total,
       excerpt: trend.reason,
     }));
+  }
+
+  /*
+   * ONE ROW PER SIDE PER TERM, and the row carries that side's own corpus size
+   * rather than the subject's. A consumer dividing a rival's count by the
+   * subject's denominator would produce exactly the cross corpus number the
+   * comparison refuses to print.
+   *
+   * `excerpt` carries the reason, including every reason we declined to call a
+   * term, so a warehouse row is never a bare pair of numbers waiting to be
+   * ranked.
+   */
+  for (const term of result.comparison?.terms ?? []) {
+    for (const side of term.sides) {
+      rows.push(line('comparison', {
+        subject: side.subject,
+        category: side.category,
+        term: term.term,
+        verdict: side.verdict,
+        records: side.records,
+        channels: side.channels,
+        corpusRecords: side.corpusRecords,
+        receiptId: side.sampleReceiptIds[0] ?? '',
+        excerpt: term.louder === side.subject ? `louder here: ${term.reason}` : term.reason,
+      }));
+    }
   }
 
   return rows;
@@ -162,16 +209,18 @@ export function renderNdjson(result: RunResult): string {
 }
 
 const CSV_HEADER = [
-  'kind', 'category', 'term', 'verdict', 'records', 'channels',
+  'kind', 'category', 'subject', 'term', 'verdict', 'records', 'channels',
   'receipt_id', 'source', 'channel', 'tier', 'url', 'created_utc', 'excerpt',
+  'corpus_records',
 ] as const;
 
 export function renderCsv(result: RunResult): string {
   const lines = [CSV_HEADER.join(',')];
   for (const r of flatRows(result)) {
     lines.push(csvRow([
-      r.kind, r.category, r.term, r.verdict, r.records, r.channels,
+      r.kind, r.category, r.subject, r.term, r.verdict, r.records, r.channels,
       r.receiptId, r.source, r.channel, r.tier, r.url, r.createdUtc, r.excerpt,
+      r.corpusRecords,
     ]));
   }
   /* CRLF, because that is what RFC 4180 says and what Excel expects. Anything
@@ -237,6 +286,54 @@ export function renderMarkdown(result: RunResult): string {
         out.push(`- **${inline(c.term)}**: ${what} (${c.after.records} records)`);
       }
       if (result.diff.newThemes.length) out.push(`- New topics: ${result.diff.newThemes.map(inline).join(', ')}`);
+      out.push('');
+    }
+  }
+
+  /*
+   * Versus what, as a table, because that is the one shape a person pastes into
+   * a document and an agent reads without prose around it.
+   *
+   * SHARE IS THE FIRST COLUMN AND THE COUNT IS THE WORKING BESIDE IT. A reader
+   * shown two counts side by side compares them whatever the caption says, and
+   * across two corpora of different depths that comparison is about us.
+   */
+  if (result.comparison) {
+    const c = result.comparison;
+    out.push('## Versus');
+    out.push('');
+    out.push(
+      'Each rival was retrieved as a corpus of its own, so no number here is two '
+      + 'words appearing in one comment. Shares are compared, never counts.',
+    );
+    out.push('');
+
+    for (const term of c.terms) {
+      out.push(`### ${inline(term.term)}`);
+      out.push('');
+      out.push('| | share of its corpus | records | verdict | receipt |');
+      out.push('| --- | --- | --- | --- | --- |');
+      for (const side of term.sides) {
+        const mark = term.louder === side.subject ? ' **louder**' : '';
+        const share = side.corpusRecords ? `${side.sharePct.toFixed(1)}%` : 'n/a';
+        out.push(
+          `| ${inline(side.subject)}${mark} | ${share} | ${side.records} of ${side.corpusRecords} `
+          + `| ${side.verdict} | ${side.sampleReceiptIds[0] ? `\`${side.sampleReceiptIds[0]}\`` : 'none'} |`,
+        );
+      }
+      out.push('');
+      out.push(term.louder ? inline(term.reason) : `No call: ${inline(term.reason)}`);
+      out.push('');
+    }
+
+    if (c.thinSides.length) {
+      out.push(
+        `Too little held to compare at all: ${c.thinSides.map((t) => `${inline(t.subject)} (${t.corpusRecords} records)`).join(', ')}.`,
+      );
+      out.push('');
+    }
+    if (c.unavailable.length) {
+      out.push(`Asked for and not retrieved: ${c.unavailable.map((u) => `${inline(u.subject)} (${inline(u.reason)})`).join(', ')}.`);
       out.push('');
     }
   }
@@ -307,7 +404,7 @@ export function renderMarkdown(result: RunResult): string {
   }
 
   const rc = result.receiptCheck;
-  out.push('## Receipts');
+  out.push('## Quorum');
   out.push('');
   out.push(`${rc.cited} cited, ${rc.resolved} resolved back to real records.`);
   if (rc.unresolved.length) {

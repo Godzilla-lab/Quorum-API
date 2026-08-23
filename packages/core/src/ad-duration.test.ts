@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { AdObservation } from '@receipts/corpus';
+import type { AdObservation } from '@quorum/corpus';
 import { deriveDuration, resolveAdDuration } from './ad-duration.ts';
 
 const DAY = 86_400;

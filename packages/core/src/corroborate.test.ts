@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Doc } from '@receipts/corpus';
+import type { Doc } from '@quorum/corpus';
 import { corroborate, findingsOnly } from './corroborate.ts';
 
 function doc(over: Partial<Doc> & { receiptId: string }): Doc {

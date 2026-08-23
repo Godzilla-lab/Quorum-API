@@ -1,4 +1,4 @@
--- Receipts corpus, initial schema.
+-- Quorum corpus, initial schema.
 --
 -- Mirrors the SQLite schema table for table and column for column, which is why
 -- the second driver is a driver rather than a rewrite. The two differences are

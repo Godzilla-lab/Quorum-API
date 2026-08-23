@@ -18,7 +18,7 @@
  * only table, and the type system keeps them apart.
  */
 
-import type { AdObservationInput } from '@receipts/corpus';
+import type { AdObservationInput } from '@quorum/corpus';
 import type { Ctx, Env, PlanInput } from './source.ts';
 
 /*

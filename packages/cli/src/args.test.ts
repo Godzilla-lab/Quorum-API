@@ -122,9 +122,39 @@ test('empty lists are rejected, since they would plan nothing', () => {
   assert.equal(parseArgs(['x', '--sources', '']).ok, false);
 });
 
+/* ------------------------------------------------------------------ */
+/* --compare, where each name costs a full run                         */
+/* ------------------------------------------------------------------ */
+
+test('rivals are parsed as a list, and no rivals is the default', () => {
+  const parsed = parseArgs(['alpha shoes', '--compare', 'beta shoes, gamma shoes']);
+  assert.equal(parsed.ok && parsed.kind === 'run' && parsed.options.compare.length, 2);
+  assert.deepEqual(
+    parsed.ok && parsed.kind === 'run' ? parsed.options.compare : null,
+    ['beta shoes', 'gamma shoes'],
+  );
+  const plain = parseArgs(['alpha shoes']);
+  assert.deepEqual(plain.ok && plain.kind === 'run' ? plain.options.compare : null, []);
+});
+
+test('COMPARING A SUBJECT AGAINST ITSELF IS A USAGE ERROR, NOT A RESULT', () => {
+  /*
+   * It would retrieve the same category twice and then compare it against
+   * itself, and a table showing 12.4% against 12.4% reads as a real finding
+   * about two products.
+   */
+  assert.match(usageError(['alpha shoes', '--compare', 'alpha shoes']), /names the subject itself/);
+  assert.match(usageError(['alpha shoes', '--compare', 'ALPHA SHOES']), /names the subject itself/);
+  assert.match(usageError(['alpha shoes', '--compare', 'beta, beta']), /twice/);
+});
+
+test('an empty rival list is rejected, since it would pay for nothing', () => {
+  assert.equal(parseArgs(['x', '--compare', ' , ']).ok, false);
+});
+
 test('help documents every flag the parser accepts', () => {
   for (const flag of ['--terms', '--communities', '--sources', '--corpus', '--queries',
-    '--max-records', '--deadline', '--cap', '--offline', '--json', '--quiet']) {
+    '--max-records', '--deadline', '--cap', '--offline', '--json', '--quiet', '--compare']) {
     assert.match(HELP, new RegExp(flag.replace(/-/g, '\\-')), `${flag} is undocumented`);
   }
 });

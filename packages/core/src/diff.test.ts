@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { corroborate, withEvidence, type ClaimWithEvidence } from './index.ts';
-import { receiptId, type Doc } from '@receipts/corpus';
+import { receiptId, type Doc } from '@quorum/corpus';
 import {
   MAX_SNAPSHOT_IDS, SNAPSHOT_VERSION,
   diffReports, isNotable, parseSnapshot, reportSnapshot,

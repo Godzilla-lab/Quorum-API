@@ -120,7 +120,7 @@ export interface SafeFetchResult {
  * story into an indefensible one. The contact url is the point. A maintainer
  * who dislikes our traffic should be able to email us instead of blocking us.
  */
-export const USER_AGENT = 'receipts/0.1 (+https://github.com/receipts)';
+export const USER_AGENT = 'quorum/0.1 (+https://github.com/quorum)';
 
 const DEFAULTS = {
   timeoutMs: 30_000,

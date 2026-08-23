@@ -15,8 +15,8 @@
 import {
   assessSufficiency, corroborate, discoverThemes, shareOfVoice, trendFor, withEvidence,
   type ClaimWithEvidence, type RetrievalResult, type Trend,
-} from '@receipts/core';
-import type { CorpusDriver, Doc } from '@receipts/corpus';
+} from '@quorum/core';
+import type { CorpusDriver, Doc } from '@quorum/corpus';
 import type { ReportClaims } from './jobs.ts';
 
 /*

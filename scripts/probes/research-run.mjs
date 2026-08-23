@@ -15,7 +15,7 @@ import { createCostMeter, retrieveAll } from '../../packages/core/src/index.ts';
 
 const input = process.argv[2] ?? 'running shoes';
 const nameHints = (process.argv[3] ?? '').split(',').filter(Boolean);
-const DB = '/tmp/receipts-research-run.db';
+const DB = '/tmp/quorum-research-run.db';
 for (const f of [DB, `${DB}-wal`, `${DB}-shm`]) rmSync(f, { force: true });
 
 const corpus = openSqliteCorpus({ path: DB });

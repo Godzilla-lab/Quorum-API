@@ -1,5 +1,5 @@
 /*
- * @receipts/corpus
+ * @quorum/corpus
  *
  * The engine's memory. Everything read is written here once and reused forever,
  * which buys three things at the same time: speed (a warm category answers from

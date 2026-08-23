@@ -139,13 +139,13 @@ function checkEnum(name, prop, actual, why) {
  * The real code. Everything below drives it rather than reading it.
  * ------------------------------------------------------------------ */
 
-const { SOURCE_TIER, TIER_LABEL } = await import('@receipts/corpus/tiers');
-const { MIN_RECEIPTS, WARM_MIN_DOCS, WARM_MAX_AGE_DAYS } = await import('@receipts/corpus/constants');
-const { receiptId, openSqliteCorpus } = await import('@receipts/corpus');
+const { SOURCE_TIER, TIER_LABEL } = await import('@quorum/corpus/tiers');
+const { MIN_RECEIPTS, WARM_MIN_DOCS, WARM_MAX_AGE_DAYS } = await import('@quorum/corpus/constants');
+const { receiptId, openSqliteCorpus } = await import('@quorum/corpus');
 const {
   corroborate, assessSufficiency, fabricationReport, resolveCitations,
   createCostMeter, formatVerdict,
-} = await import('@receipts/core');
+} = await import('@quorum/core');
 
 const doc = (source, externalId, channel) => ({
   receiptId: receiptId(source, externalId),

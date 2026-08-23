@@ -1,2 +1,2 @@
-/* @receipts/mcp. Populated in the milestone that owns it. */
+/* @quorum/mcp. Populated in the milestone that owns it. */
 export {};

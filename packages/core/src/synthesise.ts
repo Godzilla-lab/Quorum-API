@@ -41,8 +41,8 @@
  * produces here is a claim with ids attached or it does not exist.
  */
 
-import type { CorpusDriver, Doc } from '@receipts/corpus';
-import { MIN_RECEIPTS } from '@receipts/corpus/constants';
+import type { CorpusDriver, Doc } from '@quorum/corpus';
+import { MIN_RECEIPTS } from '@quorum/corpus/constants';
 import {
   fabricationReport, resolveCitations,
   type FabricationReport, type ModelClaim, type ResolveOptions, type ResolvedClaim,

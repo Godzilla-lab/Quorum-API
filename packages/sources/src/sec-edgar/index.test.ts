@@ -19,7 +19,7 @@ const dir = fileURLToPath(new URL('.', import.meta.url));
 const SEARCH = readFileSync(join(dir, 'fixtures/full-text-search.json'), 'utf8');
 const FILING = readFileSync(join(dir, 'fixtures/filing-excerpt.htm'), 'utf8');
 
-const ENV = { RECEIPTS_CONTACT_EMAIL: 'hello@example.test' };
+const ENV = { QUORUM_CONTACT_EMAIL: 'hello@example.test' };
 const ctx = (over: Partial<Ctx> = {}): Ctx =>
   ({ env: ENV, cost: { charge: () => 0, canSpend: () => true }, ...over });
 

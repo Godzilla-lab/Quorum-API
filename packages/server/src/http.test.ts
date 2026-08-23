@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import type { AddressInfo } from 'node:net';
-import { openSqliteCorpus, type CorpusDriver } from '@receipts/corpus';
+import { openSqliteCorpus, type CorpusDriver } from '@quorum/corpus';
 import { createReceiptsServer, hashKey } from './http.ts';
 import { createJobQueue, type JobQueue, type RunContext, type RunOutcome } from './jobs.ts';
 

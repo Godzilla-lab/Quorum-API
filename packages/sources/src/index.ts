@@ -1,5 +1,5 @@
 /*
- * @receipts/sources
+ * @quorum/sources
  *
  * One adapter per source, all behind the Source interface. Adding a source
  * touches only its own directory, which is both the extensibility story and a

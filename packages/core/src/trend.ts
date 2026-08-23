@@ -36,8 +36,8 @@
  * printed as what it is rather than promoted into a claim.
  */
 
-import { MIN_RECEIPTS, isUsableDate } from '@receipts/corpus/constants';
-import type { DateBucket, DateHistogram } from '@receipts/corpus';
+import { MIN_RECEIPTS, isUsableDate } from '@quorum/corpus/constants';
+import type { DateBucket, DateHistogram } from '@quorum/corpus';
 
 /*
  * `rising` and `fading`  the share moved by more than the noise floor
@@ -123,11 +123,19 @@ const pct = (part: number, whole: number): number => (whole ? (100 * part) / who
  * Standard error of the difference between two proportions, in percentage
  * points. Plain binomial, no continuity correction: this is a threshold for
  * whether to print a word, not a p value anybody will quote.
+ *
+ * Exported and shaped structurally because the comparison between two
+ * PRODUCTS asks the same question as the comparison between two PERIODS, and
+ * two copies of a noise floor drift into two different answers to "is this
+ * difference real".
  */
-function noiseFloorPp(recent: TrendWindow, prior: TrendWindow): number {
-  const p1 = recent.sharePct / 100;
-  const p2 = prior.sharePct / 100;
-  const variance = (p1 * (1 - p1)) / recent.total + (p2 * (1 - p2)) / prior.total;
+export function shareNoiseFloorPp(
+  a: { sharePct: number; total: number },
+  b: { sharePct: number; total: number },
+): number {
+  const p1 = a.sharePct / 100;
+  const p2 = b.sharePct / 100;
+  const variance = (p1 * (1 - p1)) / a.total + (p2 * (1 - p2)) / b.total;
   return 2 * Math.sqrt(variance) * 100;
 }
 
@@ -200,7 +208,7 @@ export function trendFor(input: TrendInput): Trend {
     };
   }
 
-  const noisePp = noiseFloorPp(recent, prior);
+  const noisePp = shareNoiseFloorPp(recent, prior);
   if (Math.abs(deltaPp) <= noisePp) {
     return {
       term: input.term,

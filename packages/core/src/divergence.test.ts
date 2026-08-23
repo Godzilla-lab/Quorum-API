@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Doc, SourceId } from '@receipts/corpus';
+import type { Doc, SourceId } from '@quorum/corpus';
 import { corroborate } from './corroborate.ts';
 import { attestedSilence, notableGaps, tierGap } from './divergence.ts';
 

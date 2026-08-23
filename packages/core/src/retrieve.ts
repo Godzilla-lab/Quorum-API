@@ -24,9 +24,9 @@
  *   report has to stop spending, and on a metered source that is money.
  */
 
-import type { CorpusDriver, DocInput } from '@receipts/corpus';
-import type { Ctx, PlanInput, Query, Source } from '@receipts/sources';
-import { isRelevantRecord, subjectTerms } from '@receipts/sources';
+import type { CorpusDriver, DocInput } from '@quorum/corpus';
+import type { Ctx, PlanInput, Query, Source } from '@quorum/sources';
+import { isRelevantRecord, subjectTerms } from '@quorum/sources';
 
 export interface SourceOutcome {
   sourceId: string;

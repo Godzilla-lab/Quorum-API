@@ -13,21 +13,22 @@
  * the real world.
  */
 
-import type { CategoryStats, CorpusDriver, Doc } from '@receipts/corpus';
+import type { CategoryStats, CorpusDriver, Doc } from '@quorum/corpus';
 import {
   brandCandidates, looksLikeUrl, subjectTerms,
   type AdSource, type NameResolution, type Source, type Subject,
-} from '@receipts/sources';
+} from '@quorum/sources';
 import {
-  adsForVerdict, assessSufficiency, attestedFindings, attestedSilence, corroborate,
+  adsForVerdict, assessSufficiency, attestedFindings, attestedSilence, compareSides, corroborate,
   createCostMeter, formatVerdict, notableGaps, productReviewDocs, retrieveAds, retrieveAll,
   diffReports, discoverThemes, parseSnapshot, reportSnapshot, shareOfVoice,
   synthesiseAndResolve, tierGap, trendFor, withEvidence,
   type AdRetrievalResult, type AskModel, type AttestedFindings, type AttestedSilence,
+  type Comparison, type CompareSide,
   type ClaimWithEvidence, type CostLine, type FormatVerdict, type RetrievalResult,
   type ReportDiff, type ShareOfVoice, type Sufficiency, type SynthesisReport, type Theme,
   type TierGap, type Trend,
-} from '@receipts/core';
+} from '@quorum/core';
 import type { CliOptions } from './args.ts';
 
 /*
@@ -208,6 +209,14 @@ export interface RunResult {
    */
   diff: ReportDiff | null;
   /*
+   * VERSUS WHAT, with each rival retrieved as a corpus of its own.
+   *
+   * Null unless --compare was passed. Filled by `runWithComparison` rather than
+   * by `runResearch`, because a side is a whole run and a function that
+   * retrieves one subject should not quietly retrieve four.
+   */
+  comparison: Comparison | null;
+  /*
    * What a model wrote, with every id it cited already fetched back out of the
    * corpus. Null when --synthesise was not passed, when the run was offline, or
    * when no model transport was supplied.
@@ -294,7 +303,7 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
   const log = deps.onProgress ?? (() => {});
 
   const cost = createCostMeter({
-    label: 'receipts-cli',
+    label: 'quorum-cli',
     ...(options.capUsd === undefined ? {} : { capUsd: options.capUsd }),
     now,
   });
@@ -540,6 +549,19 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
       }
       for (const url of images) {
         if (deps.signal?.aborted) break;
+        /*
+         * NOT WRAPPED IN A CATCH, DELIBERATELY, and the same rule as the model
+         * below: a provider REFUSING is a value and degrades the run, a
+         * provider THROWING is our own defect and stays loud.
+         *
+         * `bench/providers.mjs` argued the other way on 2026-08-22, on the
+         * grounds that a throw at the last step discards a report that cost
+         * minutes of throttled retrieval. It does not. Sources write to the
+         * corpus as they yield, so every record survives, and the re-run that
+         * produces the report from the warm corpus is offline and takes half a
+         * second. A cheap re-run is the whole price of keeping our own bugs
+         * visible, so the harness was corrected rather than this.
+         */
         const reading = await deps.readImage(url);
         if (reading) {
           readings.push(reading);
@@ -842,6 +864,7 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
       themes,
       asOf: options.asOf ?? null,
       diff,
+      comparison: null,
       synthesis,
       readings,
       sufficiency,
@@ -854,4 +877,94 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
      * minute forty still leaves a readable database behind. */
     await corpus.close();
   }
+}
+
+/*
+ * THE SUBJECT, THEN EACH RIVAL, THEN THE COMPARISON.
+ *
+ * Sequential rather than parallel, deliberately. Every side hits the same
+ * upstreams with the same throttle, so running four at once would spend the
+ * politeness budget four times as fast against hosts we do not control and get
+ * every side rate limited rather than one side finished. It also keeps ONE
+ * corpus handle open at a time, which is the contract `runResearch` already
+ * has: it closes the corpus it opened in a `finally`.
+ *
+ * A rival that fails does NOT fail the report. It is named as unavailable, for
+ * the same reason a missing key degrades a run: the subject was retrieved and
+ * the answer about it is still worth printing.
+ */
+export async function runWithComparison(options: CliOptions, deps: RunDeps): Promise<RunResult> {
+  const primary = await runResearch(options, deps);
+  if (!options.compare.length) return primary;
+
+  const log = deps.onProgress ?? (() => {});
+
+  /* The same denominator the share of voice block already printed. Reading it
+   * back rather than recomputing it, because two numbers for "how many records
+   * are held" in one report is the self contradiction this project keeps
+   * finding in itself, and an as-of run windows this one. */
+  const denominator = (r: RunResult): number => r.voice[0]?.categoryRecords ?? r.warmth.docs;
+
+  const sides: CompareSide[] = [{
+    subject: options.subject,
+    category: primary.category,
+    corpusRecords: denominator(primary),
+    claims: primary.claims,
+  }];
+  const unavailable: { subject: string; reason: string }[] = [];
+  const costLines: CostLine[] = [...primary.cost.lines];
+  let totalUsd = primary.cost.totalUsd;
+  let hasUnverified = primary.cost.hasUnverified;
+  let overCap = primary.cost.overCap;
+  let elapsedMs = primary.elapsedMs;
+
+  for (const rival of options.compare) {
+    log(`comparing against ${JSON.stringify(rival)}, a full run of its own`);
+    try {
+      const side = await runResearch({
+        ...options,
+        subject: rival,
+        /* A rival does not compare against rivals of its own. */
+        compare: [],
+        /*
+         * Nothing a rival run produces beyond its counts is ever printed, so
+         * paying a vision model and a synthesis model per side buys output
+         * that goes straight in the bin.
+         */
+        readImages: false,
+        synthesise: false,
+      }, deps);
+
+      sides.push({
+        subject: rival,
+        category: side.category,
+        corpusRecords: denominator(side),
+        claims: side.claims,
+      });
+      costLines.push(...side.cost.lines);
+      totalUsd += side.cost.totalUsd;
+      hasUnverified = hasUnverified || side.cost.hasUnverified;
+      overCap = overCap || side.cost.overCap;
+      elapsedMs += side.elapsedMs;
+      log(`${rival}: ${side.warmth.docs} records held`);
+    } catch (error) {
+      /* Errors are values on the result anywhere an upstream can be down, and
+       * a whole side is exactly that. */
+      const reason = error instanceof Error ? error.message : String(error);
+      unavailable.push({ subject: rival, reason });
+      log(`${rival} could not be retrieved: ${reason}`);
+    }
+  }
+
+  return {
+    ...primary,
+    comparison: compareSides(sides, options.terms, unavailable),
+    /*
+     * THE COST OF EVERY SIDE, ON THE ONE REPORT. A comparison that printed the
+     * subject's cost alone would understate what the caller just spent by
+     * however many rivals they named.
+     */
+    cost: { totalUsd, lines: costLines, hasUnverified, overCap },
+    elapsedMs,
+  };
 }

@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { RATES, isCallRate } from '@receipts/core';
+import { RATES, isCallRate } from '@quorum/core';
 import { CLAIMS_MODELS, askClaims, claimsConfigured, parseModelJson } from './claims.ts';
 
 const ENV = { OPENROUTER_API_KEY: 'test-key' };

@@ -30,7 +30,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const UA = 'receipts/0.1 (+https://github.com/receipts)';
+const UA = 'quorum/0.1 (+https://github.com/quorum)';
 const FIXTURES_ONLY = process.argv.includes('--fixtures');
 
 const results = [];
@@ -177,7 +177,7 @@ const LIVE_CHECKS = [
      * url is assembled from, and losing either makes every filing unfetchable.
      */
     contract: { required: ['_id', '_source.ciks', '_source.display_names', '_source.adsh', '_source.file_date'] },
-    fetch: async () => (await getJson('https://efts.sec.gov/LATEST/search-index?q=%22running+shoes%22&forms=10-K', { 'user-agent': 'Receipts drift-check@madebyhexa.co' })).hits.hits,
+    fetch: async () => (await getJson('https://efts.sec.gov/LATEST/search-index?q=%22running+shoes%22&forms=10-K', { 'user-agent': 'Quorum drift-check@madebyhexa.co' })).hits.hits,
   },
   {
     source: 'appstore',

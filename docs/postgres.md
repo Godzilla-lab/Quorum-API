@@ -40,7 +40,7 @@ The suite is gated on an environment variable, because `npm test` runs offline,
 keyless and with no services, and that property is worth more than the
 convenience of having this run by default.
 
-    RECEIPTS_PG_URL=postgres://user@127.0.0.1:5432/receipts_conformance \
+    QUORUM_PG_URL=postgres://user@127.0.0.1:5432/quorum_conformance \
       node --disable-warning=ExperimentalWarning \
       --test packages/corpus/src/drivers/postgres.conformance.test.ts
 
@@ -64,7 +64,7 @@ directory removes every trace.
     curl -sL "$BASE/embedded-postgres-binaries-$ARCH/$VERSION/embedded-postgres-binaries-$ARCH-$VERSION.jar" -o pg.jar
     unzip -q pg.jar -d jar && mkdir -p dist && tar -xJf jar/postgres-*.txz -C dist
 
-    ./dist/bin/initdb -D data -U receipts --auth=trust -E UTF8 --locale=C
+    ./dist/bin/initdb -D data -U quorum --auth=trust -E UTF8 --locale=C
     ./dist/bin/pg_ctl -D data -l server.log -o "-p 55432 -c listen_addresses=127.0.0.1" -w start
 
 The archive ships the server only, with no `psql` and no client library. That is

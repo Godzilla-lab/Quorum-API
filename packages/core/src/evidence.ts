@@ -21,8 +21,8 @@
  * The sample is evidence to read; `receiptIds` remains the evidence of record.
  */
 
-import type { Doc, EvidenceTier, SourceId } from '@receipts/corpus';
-import { scoreKindOf, tierOf, type ScoreKind } from '@receipts/corpus/tiers';
+import type { Doc, EvidenceTier, SourceId } from '@quorum/corpus';
+import { scoreKindOf, tierOf, type ScoreKind } from '@quorum/corpus/tiers';
 import type { Corroboration } from './corroborate.ts';
 
 /*

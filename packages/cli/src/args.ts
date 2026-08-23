@@ -17,7 +17,7 @@
  * Tracks packages/cli/package.json. A test asserts they match, because a
  * comment saying "keep these in sync" is not a constraint.
  */
-import { AD_SOURCE_IDS, SOURCE_IDS } from '@receipts/sources';
+import { AD_SOURCE_IDS, SOURCE_IDS } from '@quorum/sources';
 import { OUTPUT_FORMATS, isOutputFormat, type OutputFormat } from './formats.ts';
 
 export const VERSION = '0.0.0';
@@ -54,7 +54,7 @@ export const DEFAULT_TERMS = ['quality', 'price', 'problems'];
  * it was started and a second run on the same subject is warm. Never inside the
  * repo tree by accident: a corpus database must never be committed.
  */
-export const DEFAULT_CORPUS_PATH = './receipts.db';
+export const DEFAULT_CORPUS_PATH = './quorum.db';
 
 export interface CliOptions {
   subject: string;
@@ -106,6 +106,16 @@ export interface CliOptions {
    * in March, and that is the point of keeping one.
    */
   asOf: string | undefined;
+  /*
+   * Rivals to compare the subject against, each retrieved as A CORPUS OF ITS
+   * OWN. Empty for an ordinary run.
+   *
+   * A second full run per rival, and it has to be. Counting records in the
+   * subject's corpus that happen to mention a rival measures co-occurrence: a
+   * comment saying "these run smaller than my Brooks" names a rival and a
+   * complaint and attributes the complaint to neither.
+   */
+  compare: string[];
   json: boolean;
   quiet: boolean;
 }
@@ -127,7 +137,7 @@ export type ParseResult =
 const FLAGS_WITH_VALUES = new Set([
   '--terms', '--communities', '--sources', '--corpus',
   '--queries', '--max-records', '--deadline', '--cap', '--max-images',
-  '--synthesis-model', '--format', '--as-of',
+  '--synthesis-model', '--format', '--as-of', '--compare',
 ]);
 
 const BOOLEAN_FLAGS = new Set([
@@ -182,7 +192,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
     }
 
     if (!FLAGS_WITH_VALUES.has(name)) {
-      return { ok: false, message: `unknown option ${name}. Run receipts --help for the list.` };
+      return { ok: false, message: `unknown option ${name}. Run quorum --help for the list.` };
     }
 
     if (eq !== -1) { values.set(name, arg.slice(eq + 1)); continue; }
@@ -198,7 +208,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
 
   const subject = positional.join(' ').trim();
   if (!subject) {
-    return { ok: false, message: 'nothing to research. Pass a subject: receipts "running shoes"' };
+    return { ok: false, message: 'nothing to research. Pass a subject: quorum "running shoes"' };
   }
 
   const sources = values.has('--sources') ? splitList(values.get('--sources')!) : [...AVAILABLE_SOURCES];
@@ -247,6 +257,24 @@ export function parseArgs(argv: readonly string[]): ParseResult {
    * that says what they want rather than the one that says "not text". */
   const format: OutputFormat = rawFormat ?? (flags.has('--json') ? 'json' : 'text');
 
+  /*
+   * A rival that is the subject again would retrieve the same category twice
+   * and then compare it against itself, which reads as a real result and is
+   * not one. Compared case insensitively, because "Brooks" and "brooks" are
+   * one subject to every other part of the pipeline.
+   */
+  const compare = values.has('--compare') ? splitList(values.get('--compare')!) : [];
+  if (values.has('--compare') && !compare.length) {
+    return { ok: false, message: '--compare was empty' };
+  }
+  const seen = new Set([subject.toLowerCase()]);
+  for (const rival of compare) {
+    if (seen.has(rival.toLowerCase())) {
+      return { ok: false, message: `--compare names ${JSON.stringify(rival)} twice, or names the subject itself` };
+    }
+    seen.add(rival.toLowerCase());
+  }
+
   const asOf = values.get('--as-of');
   if (asOf !== undefined && !/^\d{4}-(0[1-9]|1[0-2])$/.test(asOf)) {
     return { ok: false, message: `--as-of takes a month as YYYY-MM, got ${JSON.stringify(asOf)}` };
@@ -273,6 +301,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       synthesisModel: values.get('--synthesis-model'),
       format,
       asOf,
+      compare,
       json: flags.has('--json'),
       quiet: flags.has('--quiet'),
     },
@@ -294,7 +323,7 @@ function parseVerify(argv: readonly string[]): ParseResult {
     if (name === '--json' || name === '--quiet') { flags.add(name); continue; }
     if (name === '--help' || name === '-h') return { ok: true, kind: 'help' };
     if (name !== '--corpus') {
-      return { ok: false, message: `unknown option ${name} for verify. Run receipts --help for the list.` };
+      return { ok: false, message: `unknown option ${name} for verify. Run quorum --help for the list.` };
     }
     if (eq !== -1) { values.set(name, arg.slice(eq + 1)); continue; }
     const next = argv[i + 1];
@@ -320,7 +349,7 @@ function parseVerify(argv: readonly string[]): ParseResult {
 }
 
 export const HELP = [
-  'receipts <subject> [options]',
+  'quorum <subject> [options]',
   '',
   'Market evidence with a receipt behind every number. The subject can be plain',
   'text ("running shoes"), a product URL, or a product URL the store blocks.',
@@ -359,6 +388,12 @@ export const HELP = [
   '                       Filters on when each record was written, so the answer',
   '                       includes what we harvested later. Nobody else can do',
   '                       this, because nobody else keeps the records.',
+  '  --compare a,b        compare against these rivals, versus what.',
+  '                       EACH ONE IS A FULL RUN of its own, with its own',
+  '                       retrieval and its own corpus, so it costs what a run',
+  '                       costs and the total is on the report. Shares are',
+  '                       compared, never counts, and a gap inside the sampling',
+  '                       noise is reported as no difference.',
   '  --quiet              suppress progress, keep the result',
   '  -h, --help           this',
   '  -v, --version        version',

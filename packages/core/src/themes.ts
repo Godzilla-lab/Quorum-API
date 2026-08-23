@@ -33,9 +33,9 @@
  * with no blocklist of bot phrases to maintain.
  */
 
-import { MIN_RECEIPTS } from '@receipts/corpus/constants';
-import type { Doc } from '@receipts/corpus';
-import { isBotBoilerplate } from '@receipts/sources';
+import { MIN_RECEIPTS } from '@quorum/corpus/constants';
+import type { Doc } from '@quorum/corpus';
+import { isBotBoilerplate } from '@quorum/sources';
 import { corroborate, type Corroboration } from './corroborate.ts';
 
 export interface Theme {

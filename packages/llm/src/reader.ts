@@ -14,12 +14,12 @@
  * network boundary.
  */
 
-import { safeFetch } from '@receipts/sources';
-import type { Env } from '@receipts/sources';
+import { safeFetch } from '@quorum/sources';
+import type { Env } from '@quorum/sources';
 import { readImage, type VisionOptions, type VisionResult } from './vision.ts';
 import { expandSubject, type ExpansionResult } from './expand.ts';
 import { askClaims } from './claims.ts';
-import type { AskModel } from '@receipts/core';
+import type { AskModel } from '@quorum/core';
 
 /*
  * Product photographs run to a few hundred kilobytes and ad creative larger.

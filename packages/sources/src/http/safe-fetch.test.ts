@@ -187,7 +187,7 @@ test('every request identifies itself', async () => {
   /* The header is applied in the real transport, so assert on the constant and
    * on the shape rather than on a stubbed call. */
   const { USER_AGENT } = await import('./safe-fetch.ts');
-  assert.match(USER_AGENT, /^receipts\//, 'it names the project');
+  assert.match(USER_AGENT, /^quorum\//, 'it names the project');
   assert.match(USER_AGENT, /\+https?:\/\//, 'and carries a contact url so we can be emailed rather than blocked');
 
   const r = await safeFetch('https://example.com/', {
@@ -213,7 +213,7 @@ test('a caller can override the user agent to identify a specific adapter', asyn
   /* The Arctic Shift client does this, so its traffic is attributable to it. */
   const r = await safeFetch('https://example.com/', {
     resolver: resolvesTo('93.184.216.34'),
-    headers: { 'user-agent': 'receipts-arcticshift/0.1 (+https://github.com/receipts)' },
+    headers: { 'user-agent': 'quorum-arcticshift/0.1 (+https://github.com/quorum)' },
     transport: async () => ok(),
   });
   assert.equal(r.ok, true);

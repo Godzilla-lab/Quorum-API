@@ -16,12 +16,12 @@
  */
 
 import process from 'node:process';
-import { findProductByName, makeAdSource, makeSource, resolveSubject } from '@receipts/sources';
-import { askClaimsLive, expandSubjectLive, readImageLive } from '@receipts/llm';
+import { findProductByName, makeAdSource, makeSource, resolveSubject } from '@quorum/sources';
+import { askClaimsLive, expandSubjectLive, readImageLive } from '@quorum/llm';
 import { HELP, VERSION, parseArgs } from './args.ts';
 import { renderJson, renderText } from './render.ts';
 import { renderCsv, renderMarkdown, renderNdjson } from './formats.ts';
-import { runResearch } from './run.ts';
+import { runWithComparison } from './run.ts';
 
 /* Documented in HELP. Anything that moves here moves there. */
 const EXIT_OK = 0;
@@ -33,14 +33,14 @@ export async function main(argv: readonly string[]): Promise<number> {
   const parsed = parseArgs(argv);
 
   if (!parsed.ok) {
-    process.stderr.write(`receipts: ${parsed.message}\n`);
+    process.stderr.write(`quorum: ${parsed.message}\n`);
     return EXIT_USAGE;
   }
   if (parsed.kind === 'help') { process.stdout.write(`${HELP}\n`); return EXIT_OK; }
   if (parsed.kind === 'version') { process.stdout.write(`${VERSION}\n`); return EXIT_OK; }
 
   if (parsed.kind === 'verify') {
-    const { openSqliteCorpus } = await import('@receipts/corpus');
+    const { openSqliteCorpus } = await import('@quorum/corpus');
     const { readClaims, renderVerify, verifyClaims } = await import('./verify.ts');
 
     let raw: string;
@@ -56,7 +56,7 @@ export async function main(argv: readonly string[]): Promise<number> {
         })
         : await (await import('node:fs/promises')).readFile(parsed.options.file, 'utf8');
     } catch (err) {
-      process.stderr.write(`receipts: cannot read ${parsed.options.file}: ${err instanceof Error ? err.message : 'unknown'}\n`);
+      process.stderr.write(`quorum: cannot read ${parsed.options.file}: ${err instanceof Error ? err.message : 'unknown'}\n`);
       return EXIT_FAILED;
     }
 
@@ -64,7 +64,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     try {
       claims = readClaims(JSON.parse(raw));
     } catch {
-      process.stderr.write('receipts: that file is not json\n');
+      process.stderr.write('quorum: that file is not json\n');
       return EXIT_USAGE;
     }
 
@@ -88,7 +88,7 @@ export async function main(argv: readonly string[]): Promise<number> {
    * the moment it is imported, and a help screen that emits a database warning
    * reads as a broken tool.
    */
-  const { openSqliteCorpus } = await import('@receipts/corpus');
+  const { openSqliteCorpus } = await import('@quorum/corpus');
 
   const options = parsed.options;
   const controller = new AbortController();
@@ -100,7 +100,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   process.on('SIGTERM', onInterrupt);
 
   try {
-    const result = await runResearch(options, {
+    const result = await runWithComparison(options, {
       openCorpus: (path) => openSqliteCorpus({ path }),
       resolveSubject,
       makeSource,
@@ -167,7 +167,7 @@ export async function main(argv: readonly string[]): Promise<number> {
      * be opened, or the disk is full. A source failing never gets here, because
      * retrieval reports degradation as a value rather than throwing.
      */
-    process.stderr.write(`receipts: ${err instanceof Error ? err.message : 'run failed'}\n`);
+    process.stderr.write(`quorum: ${err instanceof Error ? err.message : 'run failed'}\n`);
     return EXIT_FAILED;
   } finally {
     process.off('SIGINT', onInterrupt);

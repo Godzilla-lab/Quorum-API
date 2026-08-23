@@ -25,7 +25,7 @@
  *              where Postgres deadlocks if a driver holds locks in an
  *              inconsistent order.
  *
- * Gated on RECEIPTS_PG_URL like the rest of the Postgres suite.
+ * Gated on QUORUM_PG_URL like the rest of the Postgres suite.
  */
 
 import assert from 'node:assert/strict';
@@ -38,7 +38,7 @@ import { openPostgresCorpus } from './postgres.ts';
 import { connectPgWire, type PgWireClient } from './pg-wire.ts';
 import type { CorpusDriver, DocInput } from '../index.ts';
 
-const PG_URL = process.env['RECEIPTS_PG_URL'];
+const PG_URL = process.env['QUORUM_PG_URL'];
 const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../migrations');
 
 /* Eight writers and 150 rows each, so the disjoint case writes 1200 rows. The
@@ -47,7 +47,7 @@ const WRITERS = 8;
 const ROWS_PER_WRITER = 150;
 
 if (!PG_URL) {
-  test('postgres: concurrent writers', { skip: 'set RECEIPTS_PG_URL to run this' }, () => {});
+  test('postgres: concurrent writers', { skip: 'set QUORUM_PG_URL to run this' }, () => {});
 } else {
   const url = new URL(PG_URL);
   const connect = (): Promise<PgWireClient> => connectPgWire({

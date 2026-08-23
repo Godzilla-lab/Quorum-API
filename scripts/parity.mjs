@@ -43,9 +43,9 @@ if (!existsSync(ENGINE)) {
 const { openCorpus } = await import(`${ENGINE}/lib/corpus.mjs`);
 const oldAds = await import(`${ENGINE}/lib/ads.mjs`);
 
-const { openSqliteCorpus } = await import('@receipts/corpus');
-const { creativeType: newCreativeType } = await import('@receipts/sources');
-const { formatVerdict: newFormatVerdict, corroborate } = await import('@receipts/core');
+const { openSqliteCorpus } = await import('@quorum/corpus');
+const { creativeType: newCreativeType } = await import('@quorum/sources');
+const { formatVerdict: newFormatVerdict, corroborate } = await import('@quorum/core');
 
 /* ------------------------------------------------------------------ *
  * 1. SEARCH. The same rows, the same query, through both drivers.

@@ -39,9 +39,9 @@
  * and here are their ids.
  */
 
-import type { Doc } from '@receipts/corpus';
-import { MIN_RECEIPTS } from '@receipts/corpus/constants';
-import { tierOf } from '@receipts/corpus/tiers';
+import type { Doc } from '@quorum/corpus';
+import { MIN_RECEIPTS } from '@quorum/corpus/constants';
+import { tierOf } from '@quorum/corpus/tiers';
 import type { Corroboration } from './corroborate.ts';
 
 export type Divergence =

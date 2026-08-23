@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Doc, SourceId } from '@receipts/corpus';
+import type { Doc, SourceId } from '@quorum/corpus';
 import { attestedFindings } from './attested.ts';
 
 const doc = (source: SourceId, id: string, channel: string, text = 'a long enough body of text to be a real record about the product'): Doc => ({

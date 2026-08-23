@@ -29,8 +29,8 @@
  * feature that works on a quiet afternoon, which is worse than no feature.
  */
 
-import type { AskModel, ModelUsage } from '@receipts/core';
-import type { Env } from '@receipts/sources';
+import type { AskModel, ModelUsage } from '@quorum/core';
+import type { Env } from '@quorum/sources';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 

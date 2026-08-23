@@ -13,11 +13,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { openSqliteCorpus, type CorpusDriver, type Doc } from '@receipts/corpus';
-import type { Source, SourceRecord, Subject } from '@receipts/sources';
+import { openSqliteCorpus, type CorpusDriver, type Doc } from '@quorum/corpus';
+import type { Source, SourceRecord, Subject } from '@quorum/sources';
 import type { CliOptions } from './args.ts';
-import { RATES, isCallRate, type AskModel } from '@receipts/core';
-import { runResearch, type ImageReading, type RunDeps } from './run.ts';
+import { RATES, isCallRate, type AskModel } from '@quorum/core';
+import { runResearch, runWithComparison, type ImageReading, type RunDeps } from './run.ts';
 
 /* Derived, never hardcoded: a vendor repricing must not break a meter test. */
 const AD_KEY = 'apify.fb-ads-item';
@@ -30,7 +30,7 @@ const AD_RATE = (() => {
  * drift where the meter does not. */
 const adMicros = (n: number): number => Math.round(AD_RATE * n * 1_000_000);
 
-const scratch = mkdtempSync(join(tmpdir(), 'receipts-cli-'));
+const scratch = mkdtempSync(join(tmpdir(), 'quorum-cli-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 let dbCount = 0;
@@ -56,6 +56,7 @@ function options(over: Partial<CliOptions> = {}): CliOptions {
     maxRecordsTotal: 1000,
     deadlineMs: 60_000,
     capUsd: undefined,
+    compare: [],
     offline: false,
     synthesise: false,
     synthesisModel: undefined,
@@ -415,7 +416,7 @@ test('an unusable cache row degrades to a re-fetch rather than a subject with ho
  */
 const DAY = 86_400;
 
-function adSourceYielding(records: import('@receipts/sources').AdRecord[], over: Partial<import('@receipts/sources').AdSource> = {}): import('@receipts/sources').AdSource {
+function adSourceYielding(records: import('@quorum/sources').AdRecord[], over: Partial<import('@quorum/sources').AdSource> = {}): import('@quorum/sources').AdSource {
   return {
     id: 'meta-ads-apify',
     cost: 'metered',
@@ -427,7 +428,7 @@ function adSourceYielding(records: import('@receipts/sources').AdRecord[], over:
   };
 }
 
-const ad = (adId: string, over: Partial<import('@receipts/sources').AdRecord> = {}): import('@receipts/sources').AdRecord => ({
+const ad = (adId: string, over: Partial<import('@quorum/sources').AdRecord> = {}): import('@quorum/sources').AdRecord => ({
   adId,
   advertiser: 'HOKA',
   body: 'the new clifton is here',
@@ -950,4 +951,176 @@ test('a record with no usable date is in no window, and is still evidence withou
   );
   assert.equal(windowed.claims[0]?.records, 1, 'assuming a date would fabricate one');
   assert.equal(unwindowed.claims[0]?.records, 2, 'and it is still real evidence');
+});
+
+/* ------------------------------------------------------------------ */
+/* comparison, where each rival is a run of its own                    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * A side's records have to carry that side's name, because the relevance gate
+ * requires the subject as a PHRASE. That is not a test convenience: it is why a
+ * rival needs its own retrieval at all, since records about one product do not
+ * pass the gate for another.
+ */
+function sideRecords(name: string, sizing: number, filler: number): SourceRecord[] {
+  const rows: SourceRecord[] = [];
+  let n = 0;
+  for (let i = 0; i < sizing; i++) {
+    rows.push(record(n++, `the ${name} sizing runs small, had to size up`, `r/side${i}`));
+  }
+  for (let i = 0; i < filler; i++) {
+    rows.push(record(n++, `bought the ${name} last month and they are fine`, `r/other${i}`));
+  }
+  /* Ids are per side, or the second run would upsert the first run's records. */
+  return rows.map((r) => ({ ...r, externalId: `${name.replace(/\s+/g, '')}-${r.externalId}` }));
+}
+
+/*
+ * Deps whose subject resolution echoes whatever it was handed, so each side
+ * lands in a category of its own, and whose source yields the records for
+ * whichever side is currently running. `makeSource` runs after
+ * `resolveSubject`, which is what makes the handoff work.
+ */
+function comparingDeps(rows: Record<string, SourceRecord[]>): RunDeps {
+  let active = '';
+  return deps({
+    resolveSubject: async (input) => {
+      active = input;
+      return { ...SUBJECT, category: input, title: input };
+    },
+    makeSource: () => sourceYielding('reddit', rows[active] ?? []),
+  });
+}
+
+test('WITHOUT --compare THERE IS NO COMPARISON, AND NO SECOND RUN IS PAID FOR', async () => {
+  let runs = 0;
+  const result = await runWithComparison(options({ offline: true }), deps({
+    resolveSubject: async () => { runs++; return SUBJECT; },
+  }));
+  assert.equal(result.comparison, null);
+  assert.equal(runs, 1);
+});
+
+test('EACH RIVAL IS RETRIEVED AS A CORPUS OF ITS OWN, AND SHARES ARE COMPARED', async () => {
+  /*
+   * The whole reason this is a retrieval feature. `alpha shoes` holds 45 of 90
+   * records about sizing and `beta shoes` holds 4 of 60, and NEITHER corpus
+   * contains a record about the other product. There is no co-occurrence
+   * anywhere in this test, which is the point.
+   */
+  const corpusPath = freshDb();
+  const result = await runWithComparison(
+    options({ corpusPath, subject: 'alpha shoes', terms: ['sizing'], compare: ['beta shoes'] }),
+    comparingDeps({
+      'alpha shoes': sideRecords('alpha shoes', 45, 45),
+      'beta shoes': sideRecords('beta shoes', 4, 56),
+    }),
+  );
+
+  const c = result.comparison!;
+  assert.equal(c.baseline, 'alpha shoes');
+  const sizing = c.terms[0]!;
+  assert.equal(sizing.sides.length, 2);
+  assert.equal(sizing.louder, 'alpha shoes');
+  assert.equal(sizing.sides[0]?.records, 45);
+  assert.equal(sizing.sides[1]?.records, 4);
+  /* Each side's count is against its OWN corpus, never the subject's. */
+  assert.equal(sizing.sides[0]?.corpusRecords, 90);
+  assert.equal(sizing.sides[1]?.corpusRecords, 60);
+  assert.ok(sizing.deltaPp > sizing.noisePp);
+
+  /* And every side names receipts that fetch back out of the real corpus. */
+  const corpus = openSqliteCorpus({ path: corpusPath });
+  for (const side of sizing.sides) {
+    const found = await corpus.getByReceiptIds(side.sampleReceiptIds);
+    assert.equal(found.length, side.sampleReceiptIds.length, `${side.subject} cited an id that does not resolve`);
+  }
+  await corpus.close();
+});
+
+test('THE COUNT WINS AND THE SHARE LOSES, AND THE SHARE IS WHAT IS REPORTED', async () => {
+  /*
+   * `alpha shoes` has more sizing records in absolute terms and a corpus four
+   * times the size, so sizing is a smaller part of what is said about it. A
+   * comparison on counts reports the wrong product.
+   */
+  const result = await runWithComparison(
+    options({ corpusPath: freshDb(), subject: 'alpha shoes', terms: ['sizing'], compare: ['beta shoes'] }),
+    comparingDeps({
+      'alpha shoes': sideRecords('alpha shoes', 14, 186),
+      'beta shoes': sideRecords('beta shoes', 12, 38),
+    }),
+  );
+
+  const sizing = result.comparison!.terms[0]!;
+  assert.equal(sizing.sides[0]?.subject, 'beta shoes', 'ranked by share');
+  assert.ok(sizing.sides[0]!.records < sizing.sides[1]!.records, 'and it holds fewer records');
+  assert.equal(sizing.louder, 'beta shoes');
+});
+
+test('A RIVAL THAT CANNOT BE RETRIEVED IS NAMED, AND THE REPORT STILL SHIPS', async () => {
+  /* A side missing in silence looks exactly like a side with nothing to say. */
+  const result = await runWithComparison(
+    options({ corpusPath: freshDb(), subject: 'alpha shoes', terms: ['sizing'], compare: ['beta shoes'] }),
+    deps({
+      resolveSubject: async (input) => {
+        if (input === 'beta shoes') throw new Error('resolver timed out');
+        return { ...SUBJECT, category: input, title: input };
+      },
+      makeSource: () => sourceYielding('reddit', sideRecords('alpha shoes', 45, 45)),
+    }),
+  );
+
+  assert.deepEqual(result.comparison?.unavailable, [{ subject: 'beta shoes', reason: 'resolver timed out' }]);
+  /* The subject was still retrieved, so its own findings are intact. */
+  assert.equal(result.claims[0]?.verdict, 'finding');
+  assert.equal(result.comparison?.terms[0]?.louder, null, 'one side is not a comparison');
+});
+
+test('THE COST OF EVERY SIDE IS ON THE ONE REPORT', async () => {
+  /*
+   * A comparison that printed the subject's cost alone would understate what
+   * the caller just spent by however many rivals they named.
+   */
+  const spender = sourceYielding('reddit', [], {
+    async *retrieve(_query, ctx) {
+      for (let i = 0; i < 4; i++) ctx.cost.charge(AD_KEY);
+      yield* sideRecords('alpha shoes', 3, 3);
+    },
+  });
+  const result = await runWithComparison(
+    options({ corpusPath: freshDb(), subject: 'alpha shoes', terms: ['sizing'], compare: ['beta shoes'] }),
+    deps({
+      resolveSubject: async (input) => ({ ...SUBJECT, category: input, title: input }),
+      makeSource: () => spender,
+    }),
+  );
+
+  /* Two runs, four charges each. */
+  assert.equal(result.cost.totalUsd, (adMicros(1) * 8) / 1_000_000);
+  assert.equal(result.cost.lines.reduce((n, l) => n + l.calls, 0), 8);
+});
+
+test('a rival never pays for a vision model or a synthesis model', async () => {
+  /* Nothing a rival run produces beyond its counts is printed, so anything
+   * else it bought would go straight in the bin. */
+  const asked: string[] = [];
+  await runWithComparison(
+    options({
+      corpusPath: freshDb(), subject: 'alpha shoes', terms: ['sizing'],
+      compare: ['beta shoes'], readImages: true, synthesise: true,
+    }),
+    deps({
+      resolveSubject: async (input) => ({
+        ...SUBJECT, category: input, title: input, images: ['https://img.test/1.jpg'],
+      }),
+      makeSource: () => sourceYielding('reddit', sideRecords('alpha shoes', 3, 3)),
+      readImage: async (url) => { asked.push(url); return null; },
+      askModel: async () => { asked.push('model'); return { ok: false as const, error: 'no' }; },
+    }),
+  );
+
+  assert.equal(asked.filter((a) => a === 'model').length, 1, 'the subject only');
+  assert.equal(asked.filter((a) => a !== 'model').length, 1, 'the subject only');
 });

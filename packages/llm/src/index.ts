@@ -1,5 +1,5 @@
 /*
- * @receipts/llm
+ * @quorum/llm
  *
  * Provider routing, and the one place a model is allowed to look at something
  * and say what it saw. Everything here produces INTERPRETATIONS, never

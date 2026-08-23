@@ -11,10 +11,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
-import { openSqliteCorpus, type CorpusDriver } from '@receipts/corpus';
+import { openSqliteCorpus, type CorpusDriver } from '@quorum/corpus';
 import { readClaims, renderVerify, verifyClaims } from './verify.ts';
 
-const scratch = mkdtempSync(join(tmpdir(), 'receipts-verify-'));
+const scratch = mkdtempSync(join(tmpdir(), 'quorum-verify-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 async function seeded(): Promise<{ corpus: CorpusDriver; ids: string[] }> {

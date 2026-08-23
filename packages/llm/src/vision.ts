@@ -37,7 +37,7 @@
  * 262k context. One free key, and the source degrades to empty without it.
  */
 
-import type { Env } from '@receipts/sources';
+import type { Env } from '@quorum/sources';
 
 /*
  * Free vision models, in preference order, MEASURED LIVE 2026-08-22.

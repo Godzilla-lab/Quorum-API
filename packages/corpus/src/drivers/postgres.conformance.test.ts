@@ -5,7 +5,7 @@
  *
  * `npm test` runs offline, keyless and with no services, and that property is
  * worth more than the convenience of running this by default. So the suite
- * skips unless `RECEIPTS_PG_URL` points at a database, and CI stays green on a
+ * skips unless `QUORUM_PG_URL` points at a database, and CI stays green on a
  * bare runner.
  *
  * It is not a token skip. Every test in the shared conformance suite runs
@@ -14,7 +14,7 @@
  * exactly as a deployment would apply them.
  *
  *   node --test packages/corpus/src/drivers/postgres.conformance.test.ts
- *   with RECEIPTS_PG_URL=postgres://user@127.0.0.1:5432/dbname
+ *   with QUORUM_PG_URL=postgres://user@127.0.0.1:5432/dbname
  *
  * WHAT THIS PROVES AND WHAT IT DOES NOT.
  *
@@ -35,11 +35,11 @@ import type { CorpusDriver } from '../driver.ts';
 import { openPostgresCorpus } from './postgres.ts';
 import { connectPgWire } from './pg-wire.ts';
 
-const PG_URL = process.env['RECEIPTS_PG_URL'];
+const PG_URL = process.env['QUORUM_PG_URL'];
 const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../migrations');
 
 if (!PG_URL) {
-  test('postgres: conformance against a real database', { skip: 'set RECEIPTS_PG_URL to run this' }, () => {});
+  test('postgres: conformance against a real database', { skip: 'set QUORUM_PG_URL to run this' }, () => {});
 } else {
   const url = new URL(PG_URL);
   let counter = 0;

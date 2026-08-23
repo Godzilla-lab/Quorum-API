@@ -29,10 +29,10 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { CorpusDriver, SourceId } from '@receipts/corpus';
-import { isReceiptId } from '@receipts/corpus';
-import { scoreKindOf, tierOf } from '@receipts/corpus/tiers';
-import { resolveCitations, fabricationReport, type ModelClaim } from '@receipts/core';
+import type { CorpusDriver, SourceId } from '@quorum/corpus';
+import { isReceiptId } from '@quorum/corpus';
+import { scoreKindOf, tierOf } from '@quorum/corpus/tiers';
+import { resolveCitations, fabricationReport, type ModelClaim } from '@quorum/core';
 import type { JobQueue, ReportRequest, ReportSnapshot } from './jobs.ts';
 
 export interface ServerOptions {

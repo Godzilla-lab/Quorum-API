@@ -1,5 +1,5 @@
 {
-  "name": "@receipts/cli",
+  "name": "@quorum/cli",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "node": ">=22.18.0"
   },
   "bin": {
-    "receipts": "./src/bin.ts"
+    "quorum": "./src/bin.ts"
   },
   "exports": {
     ".": "./src/index.ts"
@@ -17,9 +17,9 @@
     "test": "node --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\""
   },
   "dependencies": {
-    "@receipts/core": "*",
-    "@receipts/llm": "*",
-    "@receipts/corpus": "*",
-    "@receipts/sources": "*"
+    "@quorum/core": "*",
+    "@quorum/llm": "*",
+    "@quorum/corpus": "*",
+    "@quorum/sources": "*"
   }
 }

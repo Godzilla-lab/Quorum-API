@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { openSqliteCorpus } from '@receipts/corpus';
-import type { Ctx, PlanInput, Query, Source, SourceRecord } from '@receipts/sources';
+import { openSqliteCorpus } from '@quorum/corpus';
+import type { Ctx, PlanInput, Query, Source, SourceRecord } from '@quorum/sources';
 import { retrieveAll } from './retrieve.ts';
 
 const PLAN: PlanInput = {

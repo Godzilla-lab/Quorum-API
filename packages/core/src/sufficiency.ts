@@ -22,7 +22,7 @@
  * and what would fix it, rather than being handed the same blank table.
  */
 
-import { MIN_RECEIPTS } from '@receipts/corpus/constants';
+import { MIN_RECEIPTS } from '@quorum/corpus/constants';
 import type { Corroboration } from './corroborate.ts';
 import type { RetrievalResult } from './retrieve.ts';
 

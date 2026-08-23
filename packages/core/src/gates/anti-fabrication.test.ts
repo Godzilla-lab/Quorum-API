@@ -13,7 +13,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { openSqliteCorpus, type CorpusDriver } from '@receipts/corpus';
+import { openSqliteCorpus, type CorpusDriver } from '@quorum/corpus';
 import { extractQuotes, fabricationReport, publishable, quoteIsSupported, resolveCitations } from './citations.ts';
 
 const REAL_QUOTE = 'they run small, I had to size up half a size';

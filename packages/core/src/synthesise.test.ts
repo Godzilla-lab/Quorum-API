@@ -18,8 +18,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { openSqliteCorpus, receiptId, type CorpusDriver, type Doc } from '@receipts/corpus';
-import { MIN_RECEIPTS } from '@receipts/corpus/constants';
+import { openSqliteCorpus, receiptId, type CorpusDriver, type Doc } from '@quorum/corpus';
+import { MIN_RECEIPTS } from '@quorum/corpus/constants';
 import {
   buildEvidenceBook, buildPrompt, synthesise, CLAIMS_SCHEMA, SYSTEM_PROMPT,
   type AskModel, type EvidenceBook,

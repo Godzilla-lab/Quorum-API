@@ -1,5 +1,5 @@
 /*
- * @receipts/cli
+ * @quorum/cli
  *
  * A thin client over core. Everything it needs is injected, so the run is
  * testable offline and `bin.ts` is the only file that touches the real world.

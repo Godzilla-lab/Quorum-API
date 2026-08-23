@@ -24,7 +24,7 @@
  * and no policy attached, so its effective policy was "trust the caller". These
  * tests are what replaces that.
  *
- * Gated on RECEIPTS_PG_URL, like the conformance suite, and it additionally
+ * Gated on QUORUM_PG_URL, like the conformance suite, and it additionally
  * needs a role that can CREATE ROLE.
  */
 
@@ -36,11 +36,11 @@ import { test } from 'node:test';
 
 import { connectPgWire, type PgWireClient } from './pg-wire.ts';
 
-const PG_URL = process.env['RECEIPTS_PG_URL'];
+const PG_URL = process.env['QUORUM_PG_URL'];
 const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../migrations');
 
 if (!PG_URL) {
-  test('postgres: row level security', { skip: 'set RECEIPTS_PG_URL to run this' }, () => {});
+  test('postgres: row level security', { skip: 'set QUORUM_PG_URL to run this' }, () => {});
 } else {
   const url = new URL(PG_URL);
   const connect = (user: string): Promise<PgWireClient> => connectPgWire({

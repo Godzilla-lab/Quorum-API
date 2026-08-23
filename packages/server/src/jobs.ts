@@ -449,7 +449,18 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       for (const [k, v] of idempotency) if (v.at < cutoff) idempotency.delete(k);
 
       if (idempotencyKey) {
-        const stored = idempotency.get(`${keyLabel} ${idempotencyKey}`);
+        /*
+         * NUL joins the two halves because it is the one byte that cannot
+         * appear in either, so no pair of key label and idempotency key can
+         * collide with another pair by moving the boundary.
+         *
+         * WRITTEN AS AN ESCAPE, NOT AS THE BYTE. It was a literal NUL in the
+         * source until 2026-08-22, which made `file` call this module binary
+         * data and made grep skip it in silence: searching this file for
+         * `coalescingKey` returned nothing while the function was defined in
+         * it. Same string to the runtime, and the file stays greppable.
+         */
+        const stored = idempotency.get(`${keyLabel}\u0000${idempotencyKey}`);
         if (stored) {
           if (stored.fingerprint !== fingerprint(request)) {
             return { ok: false, status: 409, message: 'this idempotency key was already used with a different body' };
@@ -540,7 +551,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       run.reports.add(id);
 
       if (idempotencyKey) {
-        idempotency.set(`${keyLabel} ${idempotencyKey}`, {
+        idempotency.set(`${keyLabel}\u0000${idempotencyKey}`, {
           reportId: id, fingerprint: fingerprint(request), at: now(),
         });
       }

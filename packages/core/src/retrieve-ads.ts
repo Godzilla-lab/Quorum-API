@@ -23,8 +23,8 @@
  *   each call rather than after.
  */
 
-import type { AdObservationInput, CorpusDriver } from '@receipts/corpus';
-import type { AdSource, Ctx, PlanInput } from '@receipts/sources';
+import type { AdObservationInput, CorpusDriver } from '@quorum/corpus';
+import type { AdSource, Ctx, PlanInput } from '@quorum/sources';
 import type { SourceOutcome } from './retrieve.ts';
 import { resolveAdDuration, type DurationResolvedAd } from './ad-duration.ts';
 

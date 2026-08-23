@@ -8,7 +8,7 @@ include what you did, what you expected, and what happened.
 
 ## What this project touches, and where the risk actually is
 
-Receipts fetches public web content on behalf of callers and feeds it to a
+Quorum fetches public web content on behalf of callers and feeds it to a
 language model. That shape has two sharp edges, and both get tests rather than
 good intentions.
 
@@ -41,7 +41,7 @@ is blunt: this cannot be fully solved inside current architectures, and adaptive
 attacks defeat essentially every published defence, so the only real posture is
 defence in depth with deterministic policy enforced outside the model.
 
-Receipts is unusually well placed here, because the product rule and the
+Quorum is unusually well placed here, because the product rule and the
 security control are the same mechanism:
 
 - **A claim needs corroboration from at least three independent records** before

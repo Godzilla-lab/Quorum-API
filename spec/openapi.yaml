@@ -1,11 +1,11 @@
 openapi: 3.1.0
 
 info:
-  title: Receipts API
+  title: Quorum API
   version: 0.1.0
   summary: Market evidence where every claim resolves to a real record.
   description: |
-    Receipts turns a subject into corroborated market evidence. Every claim
+    Quorum turns a subject into corroborated market evidence. Every claim
     carries receipt ids, and every receipt id is fetchable, so a customer of our
     customer can click a claim and read the human who said it.
 
@@ -68,8 +68,8 @@ info:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
   contact:
-    name: Receipts
-    url: https://github.com/receipts
+    name: Quorum
+    url: https://github.com/quorum
 
 servers:
   - url: https://api.receipts.dev/v1

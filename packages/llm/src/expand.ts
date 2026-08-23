@@ -33,7 +33,7 @@
  * for a right one is that a niche product becomes researchable.
  */
 
-import type { Env } from '@receipts/sources';
+import type { Env } from '@quorum/sources';
 import { VISION_MODELS } from './vision.ts';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';

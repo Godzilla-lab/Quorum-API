@@ -27,8 +27,8 @@
  * one is a weak signal, and none is silence.
  */
 
-import type { Doc } from '@receipts/corpus';
-import { PROMOTING_TIERS, tierOf } from '@receipts/corpus/tiers';
+import type { Doc } from '@quorum/corpus';
+import { PROMOTING_TIERS, tierOf } from '@quorum/corpus/tiers';
 import { corroborate, type Corroboration } from './corroborate.ts';
 import { sampleEvidence, type ClaimEvidence } from './evidence.ts';
 

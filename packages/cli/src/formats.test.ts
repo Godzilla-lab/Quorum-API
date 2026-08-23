@@ -10,8 +10,8 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { corroborate, withEvidence } from '@receipts/core';
-import type { Doc } from '@receipts/corpus';
+import { compareSides, corroborate, withEvidence } from '@quorum/core';
+import type { Doc } from '@quorum/corpus';
 import { csvField, flatRows, isOutputFormat, renderCsv, renderMarkdown, renderNdjson, OUTPUT_FORMATS } from './formats.ts';
 import type { RunResult } from './run.ts';
 
@@ -55,6 +55,7 @@ function result(over: Partial<RunResult> = {}): RunResult {
     themes: [],
     asOf: null,
     diff: null,
+    comparison: null,
     synthesis: null,
     readings: [],
     sufficiency: { verdict: 'sufficient', reason: 'ok', seen: 0, rejected: 0, stored: 0, findings: 1, suggestions: [] },
@@ -69,11 +70,38 @@ function result(over: Partial<RunResult> = {}): RunResult {
 /* csv, where the bugs live                                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * A minimal RFC 4180 reader. Here rather than a split, because splitting on
+ * commas is the exact defect these tests exist to catch, and a test that
+ * reproduces the bug it is checking for proves nothing.
+ */
+function parseCsvLine(line: string): string[] {
+  const fields: string[] = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (inQuotes && ch === '"' && line[i + 1] === '"') { field += '"'; i++; continue; }
+    if (ch === '"') { inQuotes = !inQuotes; continue; }
+    if (ch === ',' && !inQuotes) { fields.push(field); field = ''; continue; }
+    field += ch;
+  }
+  fields.push(field);
+  return fields;
+}
+
 test('A COMMA IN A QUOTE DOES NOT SHIFT EVERY COLUMN AFTER IT', () => {
   const text = 'runs small, order a size up';
   const csv = renderCsv(result({ claims: [claim('sizing', [doc('rc_a', text), doc('rc_b', 'x', 'r/b'), doc('rc_c', 'y', 'r/c')])] }));
-  const line = csv.split('\r\n').find((l) => l.includes('rc_a'))!;
-  assert.ok(line.endsWith(`"${text}"`), line);
+  const lines = csv.split('\r\n');
+  const header = parseCsvLine(lines[0]!);
+  const row = parseCsvLine(lines.find((l) => l.includes('rc_a'))!);
+
+  /* Read by column NAME, so the assertion survives a new column being added
+   * and still fails the moment a comma shifts one. */
+  assert.equal(row[header.indexOf('excerpt')], text);
+  assert.equal(row[header.indexOf('receipt_id')], 'rc_a');
+  assert.equal(row.length, header.length);
 });
 
 test('a quotation mark inside a quote is doubled, per RFC 4180', () => {
@@ -274,4 +302,66 @@ test('a theme phrase and a trend reason are flattened too', () => {
   }));
   assert.match(md, /- toe box ## Injected \(3 records/);
   assert.doesNotMatch(md, /^## Injected$/m);
+});
+
+/* ------------------------------------------------------------------ */
+/* versus what, in the flat formats                                    */
+/* ------------------------------------------------------------------ */
+
+const comparison = () => compareSides([
+  {
+    subject: 'wool runner', category: 'wool runner', corpusRecords: 300,
+    claims: [corroborate('sizing', Array.from({ length: 45 }, (_, i) => doc(`rc_a${i}`, `r/a${i}`)))],
+  },
+  {
+    subject: 'brooks ghost', category: 'brooks ghost', corpusRecords: 100,
+    claims: [corroborate('sizing', Array.from({ length: 2 }, (_, i) => doc(`rc_b${i}`, `r/b${i}`)))],
+  },
+], ['sizing']);
+
+test('A COMPARISON ROW CARRIES ITS OWN SIDE\'S DENOMINATOR, NEVER THE SUBJECT\'S', () => {
+  /*
+   * A consumer dividing a rival's count by the subject's corpus size would
+   * produce exactly the cross corpus number this refuses to print, so the
+   * denominator travels on the row.
+   */
+  const rows = flatRows(result({ comparison: comparison() })).filter((r) => r.kind === 'comparison');
+  assert.equal(rows.length, 2);
+
+  const rival = rows.find((r) => r.subject === 'brooks ghost')!;
+  assert.equal(rival.category, 'brooks ghost', 'a rival is not filed under the subject');
+  assert.equal(rival.records, 2);
+  assert.equal(rival.corpusRecords, 100, 'its own corpus, not the 300 of the subject');
+  assert.equal(rival.verdict, 'weak-signal');
+  assert.match(rival.receiptId, /^rc_b/);
+});
+
+test('the reason travels with the row, so a warehouse never gets a bare pair of numbers', () => {
+  const rows = flatRows(result({ comparison: comparison() })).filter((r) => r.kind === 'comparison');
+  for (const row of rows) assert.ok(row.excerpt.length > 0, `${row.subject} carried no reason`);
+  assert.match(rows.find((r) => r.subject === 'wool runner')!.excerpt, /^louder here: /);
+});
+
+test('every ordinary row names the subject too, so a warehouse can union runs', () => {
+  const rows = flatRows(result());
+  assert.ok(rows.length > 0);
+  for (const row of rows) assert.equal(row.subject, 'wool runner');
+});
+
+test('the csv header and every csv row grow together', () => {
+  const csv = renderCsv(result({ comparison: comparison() }));
+  const lines = csv.split('\r\n');
+  const header = parseCsvLine(lines[0]!);
+  assert.ok(header.includes('corpus_records') && header.includes('subject'));
+  for (const line of lines.slice(1)) {
+    assert.equal(parseCsvLine(line).length, header.length, line);
+  }
+});
+
+test('markdown prints the versus table with the share first', () => {
+  const md = renderMarkdown(result({ comparison: comparison() }));
+  assert.match(md, /## Versus/);
+  assert.match(md, /\| wool runner \*\*louder\*\* \| 15\.0% \| 45 of 300 \| finding \| `rc_a0` \|/);
+  assert.match(md, /\| brooks ghost \| 2\.0% \| 2 of 100 \| weak-signal \| `rc_b0` \|/);
+  assert.doesNotMatch(renderMarkdown(result()), /## Versus/);
 });

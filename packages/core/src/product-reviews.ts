@@ -32,7 +32,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { DocInput } from '@receipts/corpus';
+import type { DocInput } from '@quorum/corpus';
 
 export interface ExtractedReview {
   text: string;

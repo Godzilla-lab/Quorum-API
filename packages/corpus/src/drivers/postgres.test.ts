@@ -240,7 +240,7 @@ test('postgres: a newline in a record is content and is bound unchanged', async 
  * nobody has watched work.
  *
  * The suite lives in `postgres.conformance.test.ts` and is gated on
- * `RECEIPTS_PG_URL`, so `npm test` stays offline and keyless while the real run
+ * `QUORUM_PG_URL`, so `npm test` stays offline and keyless while the real run
  * is one environment variable away. See `docs/postgres.md`.
  *
  * The tests above use a recording fake and are still worth keeping: they prove

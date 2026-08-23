@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { receiptId, type Doc } from '@receipts/corpus';
+import { receiptId, type Doc } from '@quorum/corpus';
 import { discoverThemes, notableThemes, words } from './themes.ts';
 
 let counter = 0;

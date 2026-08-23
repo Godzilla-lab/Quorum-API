@@ -3,7 +3,7 @@
  * The dev server. The only file in this package that touches the real world.
  *
  *   npm run dev -w packages/server
- *   RECEIPTS_CORPUS=./receipts.db RECEIPTS_API_KEYS=key1,key2 PORT=8787
+ *   QUORUM_CORPUS=./quorum.db QUORUM_API_KEYS=key1,key2 PORT=8787
  *
  * With no keys configured it runs open, which is the right default for a self
  * hosted instance on a laptop and the wrong one for anything reachable. It says
@@ -24,19 +24,19 @@
  */
 
 import process from 'node:process';
-import { openSqliteCorpus } from '@receipts/corpus';
-import { isWarm } from '@receipts/corpus/constants';
-import { runResearch, type RunResult } from '@receipts/cli';
-import { SOURCE_IDS, findProductByName, makeAdSource, makeSource, resolveSubject } from '@receipts/sources';
+import { openSqliteCorpus } from '@quorum/corpus';
+import { isWarm } from '@quorum/corpus/constants';
+import { runResearch, type RunResult } from '@quorum/cli';
+import { SOURCE_IDS, findProductByName, makeAdSource, makeSource, resolveSubject } from '@quorum/sources';
 import { createReceiptsServer, hashKey } from './http.ts';
 import { createJobQueue, type ReportRequest, type RunOutcome } from './jobs.ts';
-import type { RetrievalResult } from '@receipts/core';
+import type { RetrievalResult } from '@quorum/core';
 import { computeClaims } from './claims.ts';
 
 const port = Number(process.env['PORT'] ?? 8787);
-const corpusPath = process.env['RECEIPTS_CORPUS'] ?? './receipts.db';
+const corpusPath = process.env['QUORUM_CORPUS'] ?? './quorum.db';
 
-const keys = (process.env['RECEIPTS_API_KEYS'] ?? '').split(',').map((k) => k.trim()).filter(Boolean);
+const keys = (process.env['QUORUM_API_KEYS'] ?? '').split(',').map((k) => k.trim()).filter(Boolean);
 const keyHashes = new Map(keys.map((k, i) => [hashKey(k), `key-${i + 1}`]));
 
 /*
@@ -44,7 +44,7 @@ const keyHashes = new Map(keys.map((k, i) => [hashKey(k), `key-${i + 1}`]));
  * pressure on the same volunteer archives, and the shared polite client is what
  * keeps us welcome there. Raising it raises their load, not ours.
  */
-const concurrency = Number(process.env['RECEIPTS_CONCURRENCY'] ?? 2);
+const concurrency = Number(process.env['QUORUM_CONCURRENCY'] ?? 2);
 
 const corpus = openSqliteCorpus({ path: corpusPath });
 
@@ -73,6 +73,12 @@ const queue = createJobQueue({
         corpusPath,
         maxQueriesPerSource: 6,
         maxRecordsTotal: 20_000,
+        /*
+         * Never from the hosted path. A comparison is one full retrieval per
+         * rival, so a request naming five of them is five reports charged as
+         * one, and the caller who paid for the subject did not ask for that.
+         */
+        compare: [],
         deadlineMs: request.deadlineMs ?? 60 * 60_000,
         capUsd: request.capUsd,
         offline: request.offline,
@@ -137,9 +143,9 @@ const queue = createJobQueue({
 const server = createReceiptsServer({ corpus, keyHashes, requireAuth: keyHashes.size > 0, queue });
 
 server.listen(port, () => {
-  process.stderr.write(`receipts api on http://localhost:${port}, corpus ${corpusPath}\n`);
+  process.stderr.write(`quorum api on http://localhost:${port}, corpus ${corpusPath}\n`);
   if (!keyHashes.size) {
-    process.stderr.write('no RECEIPTS_API_KEYS set, so this instance is OPEN. Fine on a laptop, not on a network.\n');
+    process.stderr.write('no QUORUM_API_KEYS set, so this instance is OPEN. Fine on a laptop, not on a network.\n');
   }
   process.stderr.write(`reports: live, ${concurrency} concurrent runs, coalesced by subject\n`);
   process.stderr.write('live: /v1/reports /v1/reports/:id /v1/reports/:id/stream /v1/healthz /v1/evidence/:id\n');

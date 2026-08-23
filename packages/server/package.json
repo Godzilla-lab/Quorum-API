@@ -1,5 +1,5 @@
 {
-  "name": "@receipts/server",
+  "name": "@quorum/server",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,9 +15,9 @@
     "dev": "node --disable-warning=ExperimentalWarning src/bin.ts"
   },
   "dependencies": {
-    "@receipts/cli": "*",
-    "@receipts/core": "*",
-    "@receipts/corpus": "*",
-    "@receipts/sources": "*"
+    "@quorum/cli": "*",
+    "@quorum/core": "*",
+    "@quorum/corpus": "*",
+    "@quorum/sources": "*"
   }
 }

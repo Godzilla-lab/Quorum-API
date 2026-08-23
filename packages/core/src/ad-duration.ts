@@ -33,7 +33,7 @@
  *   only counts once the ad is actually inactive. Measured 2026-08-13.
  */
 
-import type { AdObservation, DurationConfidence } from '@receipts/corpus';
+import type { AdObservation, DurationConfidence } from '@quorum/corpus';
 
 const SECONDS_PER_DAY = 86_400;
 

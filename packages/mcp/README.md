@@ -1,6 +1,6 @@
-# @receipts/mcp
+# @quorum/mcp
 
-An MCP server over the Receipts SDK.
+An MCP server over the Quorum SDK.
 
 Not built yet. This file is the design, recorded now so the tool surface is
 decided before anyone writes it, because the tool schema is the part that is

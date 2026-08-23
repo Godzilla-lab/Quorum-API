@@ -1,4 +1,4 @@
-/* @receipts/core. The pipeline: plan, retrieve, gate, synthesise, render. */
+/* @quorum/core. The pipeline: plan, retrieve, gate, synthesise, render. */
 export * from "./cost.ts";
 export * from "./corroborate.ts";
 export * from "./sufficiency.ts";
@@ -16,3 +16,4 @@ export * from "./divergence.ts";
 export * from "./trend.ts";
 export * from "./themes.ts";
 export * from "./diff.ts";
+export * from "./compare.ts";

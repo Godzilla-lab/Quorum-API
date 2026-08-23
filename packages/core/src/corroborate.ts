@@ -56,9 +56,9 @@
  * process that only wanted to count. A pure function should not drag a driver
  * in behind it, and the hosted server runs on postgres regardless.
  */
-import { MIN_RECEIPTS } from '@receipts/corpus/constants';
-import { PROMOTING_TIERS, tierOf } from '@receipts/corpus/tiers';
-import type { Doc, EvidenceTier, SourceId } from '@receipts/corpus';
+import { MIN_RECEIPTS } from '@quorum/corpus/constants';
+import { PROMOTING_TIERS, tierOf } from '@quorum/corpus/tiers';
+import type { Doc, EvidenceTier, SourceId } from '@quorum/corpus';
 
 export interface SourceSpread {
   source: SourceId;

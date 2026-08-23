@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { Doc } from '@receipts/corpus';
+import type { Doc } from '@quorum/corpus';
 import { corroborate } from './corroborate.ts';
 import type { RetrievalResult, SourceOutcome } from './retrieve.ts';
 import { assessSufficiency } from './sufficiency.ts';

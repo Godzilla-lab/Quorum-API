@@ -31,7 +31,7 @@
  * project sells, and it is only true if something checks.
  */
 
-import type { CorpusDriver, Doc } from '@receipts/corpus';
+import type { CorpusDriver, Doc } from '@quorum/corpus';
 import { corroborate, type Corroboration } from '../corroborate.ts';
 
 export interface ModelClaim {
