@@ -58,6 +58,21 @@ export interface PgWireOptions {
    * not offer it and a failed negotiation is a worse error than not asking.
    */
   ssl?: boolean;
+  /*
+   * VERIFY THE SERVER CERTIFICATE AGAINST THIS CA, as a PEM.
+   *
+   * A managed provider signs with its own CA, so the public root store rejects
+   * it and an unverified connection is the default anyone falls into. Supplying
+   * the provider's CA is what turns "encrypted to somebody" into "encrypted to
+   * the database I meant".
+   */
+  caCert?: string;
+  /*
+   * Whether to verify at all. Follows the `sslmode` in the uri: `require` means
+   * encrypt WITHOUT verifying, which is what the standard says and what most
+   * people think means secure. See parsePgUri.
+   */
+  verify?: boolean;
 }
 
 /*
@@ -82,6 +97,16 @@ export function parsePgUri(uri: string): PgWireOptions {
     /* `disable` is the only mode that means no. Everything else, including the
      * `require` a hosted provider hands you, means negotiate. */
     ssl: sslmode !== null && sslmode !== 'disable',
+    /*
+     * `require` ENCRYPTS AND DOES NOT VERIFY, which surprises almost everybody
+     * who reads it. libpq treats verification as a separate escalation:
+     * `verify-ca` checks the chain and `verify-full` also checks the hostname.
+     * A provider hands you `require` in its copyable uri, so following the uri
+     * literally is what a real client does and is what this reports. Handing a
+     * `caCert` to `connectPgWire` verifies anyway, which is strictly better and
+     * is the thing to do.
+     */
+    verify: sslmode === 'verify-ca' || sslmode === 'verify-full',
   };
 }
 
@@ -260,7 +285,11 @@ export function scramFinalMessage(
  * shape the reader downstream assumes. It has to be read before that reader is
  * attached, or the first byte of the TLS handshake is eaten as a message type.
  */
-async function negotiateTls(plain: Socket, host: string): Promise<Socket> {
+async function negotiateTls(
+  plain: Socket,
+  host: string,
+  options: { caCert?: string; verify: boolean },
+): Promise<Socket> {
   const request = Buffer.alloc(8);
   request.writeInt32BE(8, 0);
   request.writeInt32BE(80877103, 4);
@@ -274,14 +303,37 @@ async function negotiateTls(plain: Socket, host: string): Promise<Socket> {
     throw new Error(`this server refused TLS (answered ${JSON.stringify(answer)}). Connect without ssl, or to a server that offers it.`);
   }
 
+  /*
+   * A CA implies verification whatever the uri said: supplying one and then
+   * not checking it would be theatre. Without a CA the mode decides, and the
+   * unverified case announces itself rather than passing quietly, because
+   * "TLS" and "TLS to the server I meant" are different claims and only the
+   * second one is worth anything against an active attacker.
+   */
+  const verify = options.verify || Boolean(options.caCert);
+  if (!verify) {
+    process.emitWarning(
+      `connecting to ${host} with TLS but WITHOUT verifying its certificate, which is what sslmode=require means. `
+      + 'Supply the provider CA to verify.',
+    );
+  }
+
   return await new Promise<Socket>((resolve, reject) => {
-    const secure = tlsConnect({ socket: plain, servername: host }, () => resolve(secure));
+    const secure = tlsConnect({
+      socket: plain,
+      servername: host,
+      rejectUnauthorized: verify,
+      ...(options.caCert ? { ca: options.caCert } : {}),
+    }, () => resolve(secure));
     secure.once('error', reject);
   });
 }
 
 export async function connectPgWire(options: PgWireOptions): Promise<PgWireClient> {
-  const { host = '127.0.0.1', port = 5432, user, database, password, searchPath, ssl = false } = options;
+  const {
+    host = '127.0.0.1', port = 5432, user, database, password, searchPath,
+    ssl = false, caCert, verify = false,
+  } = options;
 
   const plain: Socket = createConnection({ host, port });
   plain.setNoDelay(true);
@@ -290,7 +342,9 @@ export async function connectPgWire(options: PgWireOptions): Promise<PgWireClien
     plain.once('error', reject);
   });
 
-  const socket: Socket = ssl ? await negotiateTls(plain, host) : plain;
+  const socket: Socket = ssl
+    ? await negotiateTls(plain, host, { verify, ...(caCert ? { caCert } : {}) })
+    : plain;
   socket.setNoDelay(true);
 
   let buffer = Buffer.alloc(0);

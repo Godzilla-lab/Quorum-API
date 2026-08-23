@@ -52,6 +52,23 @@ if (!uri) {
 }
 
 const connection = parsePgUri(uri);
+
+/*
+ * The provider CA, if you have downloaded it. Aiven, Supabase and RDS all sign
+ * with their own CA, so the public root store rejects the certificate and the
+ * path of least resistance is an unverified connection.
+ *
+ * `sslmode=require`, which is what a provider puts in its copyable uri, means
+ * ENCRYPT AND DO NOT VERIFY. That is the standard's meaning and it is a weaker
+ * promise than most people read it as. Point QUORUM_PG_CA at the CA file and
+ * the connection is verified instead, which is what you want for a database
+ * reachable from the public internet.
+ */
+const caPath = process.env['QUORUM_PG_CA'];
+if (caPath) {
+  connection.caCert = readFileSync(caPath, 'utf8');
+}
+
 const where = `${connection.host}:${connection.port}/${connection.database}`;
 
 const files = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
@@ -62,7 +79,13 @@ if (!files.length) {
 
 const digest = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
 
-console.log(`migrate: ${where}${connection.ssl ? ' over tls' : ''}, ${files.length} migration(s) on disk`);
+const how = !connection.ssl
+  ? 'unencrypted'
+  : connection.caCert ? 'over tls, certificate verified'
+  : connection.verify ? 'over tls, verified against the public root store'
+  : 'over tls, CERTIFICATE NOT VERIFIED (sslmode=require). Set QUORUM_PG_CA to verify.';
+console.log(`migrate: ${where}, ${how}`);
+console.log(`         ${files.length} migration(s) on disk`);
 
 const client = await connectPgWire(connection);
 let applied = 0;
@@ -72,16 +95,29 @@ try {
    * The ledger is itself created with IF NOT EXISTS rather than through a
    * migration, because a migration runner that needs a migration to have been
    * run cannot bootstrap an empty database.
+   *
+   * NOT CREATED ON A DRY RUN. It was, until the first dry run against a real
+   * database printed "nothing was written" immediately after writing a table.
+   * A dry run that leaves anything behind is worse than no dry run, because the
+   * whole reason to offer one is so somebody can point it at production without
+   * thinking hard first.
    */
-  await client.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      filename   text PRIMARY KEY,
-      checksum   text NOT NULL,
-      applied_at timestamptz NOT NULL DEFAULT now()
-    )
-  `);
+  if (!dryRun) {
+    await client.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename   text PRIMARY KEY,
+        checksum   text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
+  }
 
-  const rows = await client.query('SELECT filename, checksum FROM schema_migrations');
+  const ledgerExists = (await client.query(
+    "SELECT 1 AS present FROM information_schema.tables WHERE table_name = 'schema_migrations'",
+  )).length > 0;
+  const rows = ledgerExists
+    ? await client.query('SELECT filename, checksum FROM schema_migrations')
+    : [];
   const seen = new Map(rows.map((r) => [r.filename, r.checksum]));
 
   for (const filename of files) {
