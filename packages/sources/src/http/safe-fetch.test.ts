@@ -213,8 +213,151 @@ test('a caller can override the user agent to identify a specific adapter', asyn
   /* The Arctic Shift client does this, so its traffic is attributable to it. */
   const r = await safeFetch('https://example.com/', {
     resolver: resolvesTo('93.184.216.34'),
-    headers: { 'user-agent': 'quorum-arcticshift/0.1 (+https://github.com/quorum)' },
+    headers: { 'user-agent': 'quorum-arcticshift/0.1 (+https://github.com/Godzilla-lab/Quorum-API)' },
     transport: async () => ok(),
   });
   assert.equal(r.ok, true);
+});
+
+/* ------------------------------------------------------------------ */
+/* the refusal tag                                                     */
+/* ------------------------------------------------------------------ */
+
+/*
+ * WHY THESE EXIST. Before the tag, the only way to ask "could a retry ever
+ * work" was to pattern match `error`, which is an English sentence. The webhook
+ * sender did exactly that and got 13 of the 19 blocked ranges wrong, because
+ * "private" and "loopback" were in its regex and "carrier grade nat",
+ * "multicast", "nat64" and "broadcast" were not. Measured 2026-08-23.
+ *
+ * So the assertion that matters is not that one address is tagged `address`.
+ * It is that EVERY blocked range is, including the ones nobody thinks of.
+ */
+test('every blocked range is tagged address, not only the memorable ones', async () => {
+  const blocked = [
+    '0.0.0.0',           /* this network */
+    '10.0.0.1',          /* private */
+    '100.64.0.1',        /* carrier grade nat, missed by the old regex */
+    '127.0.0.1',         /* loopback */
+    '169.254.169.254',   /* link local, cloud metadata */
+    '172.16.0.1',        /* private */
+    '192.0.0.1',         /* ietf protocol assignments */
+    '192.0.2.1',         /* test net 1 */
+    '192.88.99.1',       /* 6to4 relay */
+    '192.168.1.1',       /* private */
+    '198.18.0.1',        /* benchmarking */
+    '198.51.100.1',      /* test net 2 */
+    '203.0.113.1',       /* test net 3 */
+    '224.0.0.1',         /* multicast */
+    '240.0.0.1',         /* reserved */
+    '255.255.255.255',   /* broadcast */
+    '[::]',              /* unspecified */
+    '[::1]',             /* loopback */
+    '[fc00::1]',         /* unique local */
+    '[fe80::1]',         /* link local */
+    '[ff00::1]',         /* multicast */
+    '[2001:db8::1]',     /* documentation */
+    '[::ffff:127.0.0.1]',        /* ipv4 mapped loopback */
+    '[::ffff:169.254.169.254]',  /* ipv4 mapped metadata, the classic bypass */
+    '[64:ff9b::a9fe:a9fe]',      /* nat64 wrapping metadata */
+  ];
+  for (const host of blocked) {
+    const r = await safeFetch(`https://${host}/`);
+    assert.equal(r.ok, false, `${host} must be refused`);
+    assert.equal(r.refusal, 'address', `${host} must be tagged address, it was tagged ${r.refusal}`);
+  }
+});
+
+/*
+ * Obfuscated literals, and what actually stops them.
+ *
+ * MEASURED 2026-08-23, and it is not what it looks like. The guess was that
+ * these fail to PARSE and are refused as malformed. They are not: the WHATWG
+ * URL parser NORMALISES them first, so by the time this module reads
+ * `url.hostname` it is already the decimal form.
+ *
+ *   https://0177.0.0.1/       hostname is 127.0.0.1, octal decoded
+ *   https://0x7f000001/       hostname is 127.0.0.1, hex decoded
+ *   https://2130706433/       hostname is 127.0.0.1, packed integer decoded
+ *   https://169.254.169.254./ trailing dot stripped
+ *
+ * That is a stronger position than failing closed on a parse error, because
+ * the address rules then apply to the real address rather than to a string.
+ * The property worth asserting is that no resolver is consulted for any of
+ * them: an obfuscated literal is settled before a name lookup could
+ * reinterpret it. The resolver here throws, so reaching it fails the test.
+ */
+test('an obfuscated ip literal is normalised and refused without a lookup', async () => {
+  const noLookup = async () => { throw new Error('a literal must never reach the resolver'); };
+  for (const host of ['0177.0.0.1', '0x7f000001', '2130706433', '017700000001', '169.254.169.254.']) {
+    const r = await safeFetch(`https://${host}/`, { resolver: noLookup });
+    assert.equal(r.ok, false, `${host} must be refused`);
+    assert.equal(r.refusal, 'address', `${host} must be tagged address, it was tagged ${r.refusal}`);
+  }
+});
+
+/* A host the url parser rejects outright never reaches the address rules,
+ * which is the other fail closed path and is tagged for a different reason. */
+test('a host the url parser rejects outright is tagged url', async () => {
+  const r = await safeFetch('https://1.2.3.4.5/');
+  assert.equal(r.ok, false);
+  assert.equal(r.refusal, 'url');
+});
+
+test('a blocked address reached through a redirect is tagged address', async () => {
+  const { transport } = spyTransport((url) =>
+    url.hostname === 'start.example' ? redirectTo('https://169.254.169.254/') : ok());
+  const r = await safeFetch('https://start.example/', { resolver: resolvesTo('93.184.216.34'), transport });
+  assert.equal(r.ok, false);
+  assert.equal(r.refusal, 'address');
+});
+
+/*
+ * The four tags that can never succeed on a retry, and the three that might.
+ * This is the distinction the whole type exists to carry.
+ */
+test('a name that does not resolve is tagged dns, not address', async () => {
+  const r = await safeFetch('https://nowhere.example/', { resolver: async () => null });
+  assert.equal(r.ok, false);
+  assert.equal(r.refusal, 'dns', 'a name that did not answer may answer later, unlike a forbidden address');
+});
+
+test('a refused scheme is tagged scheme', async () => {
+  for (const url of ['ftp://example.com/x', 'file:///etc/passwd']) {
+    const r = await safeFetch(url);
+    assert.equal(r.refusal, 'scheme', `${url} must be tagged scheme`);
+  }
+});
+
+test('an unparseable url and an unparseable redirect target are both tagged url', async () => {
+  assert.equal((await safeFetch('http://[not a url')).refusal, 'url');
+
+  const { transport } = spyTransport(() => redirectTo('http://['));
+  const viaRedirect = await safeFetch('https://start.example/', { resolver: resolvesTo('93.184.216.34'), transport });
+  assert.equal(viaRedirect.refusal, 'url');
+});
+
+test('too many redirects is tagged redirects', async () => {
+  const { transport } = spyTransport(() => redirectTo('https://loop.example/next'));
+  const r = await safeFetch('https://loop.example/', { resolver: resolvesTo('93.184.216.34'), transport });
+  assert.equal(r.ok, false);
+  assert.equal(r.refusal, 'redirects');
+});
+
+test('a transport failure is tagged transport and a timeout is tagged timeout', async () => {
+  const { transport: broken } = spyTransport(() => 'request failed: ECONNRESET');
+  const failed = await safeFetch('https://x.example/', { resolver: resolvesTo('93.184.216.34'), transport: broken });
+  assert.equal(failed.refusal, 'transport');
+
+  const { transport: slow } = spyTransport(() => 'request timed out');
+  const timedOut = await safeFetch('https://x.example/', { resolver: resolvesTo('93.184.216.34'), transport: slow });
+  assert.equal(timedOut.refusal, 'timeout');
+});
+
+/* A success carries no tag at all, so `refusal` is never a thing to ignore. */
+test('a successful fetch carries no refusal tag', async () => {
+  const { transport } = spyTransport(() => ok());
+  const r = await safeFetch('https://good.example/', { resolver: resolvesTo('93.184.216.34'), transport });
+  assert.equal(r.ok, true);
+  assert.equal(r.refusal, undefined);
 });

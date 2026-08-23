@@ -20,7 +20,7 @@ export { AD_SOURCE_IDS, SOURCE_IDS, makeAdSource, makeSource } from './registry.
 export type { RegisteredAdSourceId, RegisteredSourceId } from './registry.ts';
 
 export { safeFetch, USER_AGENT as HTTP_USER_AGENT } from './http/safe-fetch.ts';
-export type { SafeFetchOptions, SafeFetchResult, Resolver, HopResult } from './http/safe-fetch.ts';
+export type { SafeFetchOptions, SafeFetchResult, Refusal, Resolver, HopResult } from './http/safe-fetch.ts';
 export { checkAddress, checkScheme } from './http/ip-guard.ts';
 export type { AddressVerdict } from './http/ip-guard.ts';
 

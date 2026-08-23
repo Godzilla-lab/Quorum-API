@@ -45,6 +45,31 @@ const systemResolver: Resolver = (hostname) =>
     });
   });
 
+/*
+ * WHY A REFUSAL IS RETURNED AS A TAG AND NOT ONLY AS A SENTENCE.
+ *
+ * A caller deciding whether to try again has to know whether the refusal was a
+ * rule or a hiccup, and the only signal used to be `error`, which is English
+ * prose. The webhook sender pattern matched it and got 13 of the 19 blocked
+ * ranges wrong: "private" and "loopback" happened to be in its regex while
+ * "carrier grade nat", "multicast", "nat64" and "broadcast" were not, so a
+ * permanently blocked address was retried for hours. Measured 2026-08-23.
+ *
+ * The tag is the fact. `error` stays the human sentence and neither is derived
+ * from the other.
+ *
+ *   address    the resolved address is not routable to the public internet
+ *   scheme     the scheme is not on the allowlist
+ *   url        the url, or a redirect target, does not parse
+ *   redirects  too many hops
+ *   dns        the name did not resolve, which may be transient
+ *   transport  the connection failed or the response was unusable
+ *   timeout    the budget ran out
+ *
+ * The first four can never succeed on a retry. The last three might.
+ */
+export type Refusal = 'address' | 'scheme' | 'url' | 'redirects' | 'dns' | 'transport' | 'timeout';
+
 export interface SafeFetchOptions {
   method?: string;
   /*
@@ -96,6 +121,8 @@ export interface SafeFetchResult {
   url: string;
   /* Present when the request was refused or failed. Safe to surface. */
   error?: string;
+  /* Present whenever `error` is. Why it was refused, as a tag rather than prose. */
+  refusal?: Refusal;
 }
 
 /*
@@ -120,7 +147,7 @@ export interface SafeFetchResult {
  * story into an indefensible one. The contact url is the point. A maintainer
  * who dislikes our traffic should be able to email us instead of blocking us.
  */
-export const USER_AGENT = 'quorum/0.1 (+https://github.com/quorum)';
+export const USER_AGENT = 'quorum/0.1 (+https://github.com/Godzilla-lab/Quorum-API)';
 
 const DEFAULTS = {
   timeoutMs: 30_000,
@@ -133,8 +160,15 @@ const DEFAULTS = {
   maxRedirects: 5,
 };
 
-const refuse = (url: string, error: string): SafeFetchResult =>
-  ({ ok: false, status: 0, headers: {}, body: '', url, error });
+const refuse = (url: string, error: string, refusal: Refusal): SafeFetchResult =>
+  ({ ok: false, status: 0, headers: {}, body: '', url, error, refusal });
+
+/*
+ * The one timeout string, referenced rather than retyped, so classifying a hop
+ * failure compares against this module's own constant instead of guessing at
+ * prose. Everything else a hop can fail with is a transport problem.
+ */
+const TIMED_OUT = 'request timed out';
 
 /*
  * Resolve a hostname and return the address only if it is safe to connect to.
@@ -145,16 +179,24 @@ const refuse = (url: string, error: string): SafeFetchResult =>
 async function resolveSafely(
   hostname: string,
   resolver: Resolver,
-): Promise<{ address: string; family: 4 | 6 } | string> {
+): Promise<{ address: string; family: 4 | 6 } | { error: string; refusal: Refusal }> {
   const literal = checkAddress(hostname);
   const looksLikeLiteral = /^[\d.]+$/.test(hostname) || hostname.includes(':');
   if (looksLikeLiteral) {
-    if (!literal.allowed) return literal.reason ?? 'address not allowed';
+    /*
+     * A literal that does not parse is REFUSED, not resolved. 0177.0.0.1 and
+     * 2130706433 are the classic obfuscations, and failing closed here is what
+     * stops them: they never reach a resolver that might read them as octal or
+     * as a packed integer.
+     */
+    if (!literal.allowed) return { error: literal.reason ?? 'address not allowed', refusal: 'address' };
     return { address: hostname, family: hostname.includes(':') ? 6 : 4 };
   }
 
   const resolved = await resolver(hostname);
-  if (!resolved || !resolved.length) return 'host could not be resolved';
+  /* A name that did not answer is not a name that answered with something
+   * forbidden. The first may work in a minute; the second never will. */
+  if (!resolved || !resolved.length) return { error: 'host could not be resolved', refusal: 'dns' };
 
   /*
    * EVERY resolved address must pass, not merely the first. A name that answers
@@ -164,11 +206,11 @@ async function resolveSafely(
    */
   for (const a of resolved) {
     const verdict = checkAddress(a.address, a.family);
-    if (!verdict.allowed) return verdict.reason ?? 'address not allowed';
+    if (!verdict.allowed) return { error: verdict.reason ?? 'address not allowed', refusal: 'address' };
   }
 
   const first = resolved[0];
-  if (!first) return 'host could not be resolved';
+  if (!first) return { error: 'host could not be resolved', refusal: 'dns' };
   return first;
 }
 
@@ -274,7 +316,7 @@ function fetchOneHop(
       },
     );
 
-    req.on('timeout', () => { req.destroy(); resolve('request timed out'); });
+    req.on('timeout', () => { req.destroy(); resolve(TIMED_OUT); });
     req.on('error', (e) => resolve(`request failed: ${e.message}`));
     if (options.signal) {
       options.signal.addEventListener('abort', () => { req.destroy(); resolve('request aborted'); }, { once: true });
@@ -293,7 +335,7 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}):
   try {
     current = new URL(rawUrl);
   } catch {
-    return refuse(rawUrl, 'not a valid url');
+    return refuse(rawUrl, 'not a valid url', 'url');
   }
 
   const deadline = Date.now() + timeoutMs;
@@ -305,25 +347,27 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}):
      * around a first-hop-only guard, and it costs an attacker nothing.
      */
     const scheme = checkScheme(current.protocol);
-    if (!scheme.allowed) return refuse(current.toString(), scheme.reason ?? 'scheme not allowed');
+    if (!scheme.allowed) return refuse(current.toString(), scheme.reason ?? 'scheme not allowed', 'scheme');
 
     const pinned = await resolveSafely(current.hostname, options.resolver ?? systemResolver);
-    if (typeof pinned === 'string') return refuse(current.toString(), pinned);
+    if ('error' in pinned) return refuse(current.toString(), pinned.error, pinned.refusal);
 
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return refuse(current.toString(), 'request timed out');
+    if (remaining <= 0) return refuse(current.toString(), TIMED_OUT, 'timeout');
 
     const hopResult = options.transport
       ? await options.transport(current, pinned)
       : await fetchOneHop(current, pinned, { ...options, timeoutMs: remaining, maxBytes });
-    if (typeof hopResult === 'string') return refuse(current.toString(), hopResult);
+    if (typeof hopResult === 'string') {
+      return refuse(current.toString(), hopResult, hopResult === TIMED_OUT ? 'timeout' : 'transport');
+    }
 
     if (hopResult.location) {
       let next: URL;
       try {
         next = new URL(hopResult.location, current);
       } catch {
-        return refuse(current.toString(), 'redirect target is not a valid url');
+        return refuse(current.toString(), 'redirect target is not a valid url', 'url');
       }
       current = next;
       continue;
@@ -338,5 +382,5 @@ export async function safeFetch(rawUrl: string, options: SafeFetchOptions = {}):
     };
   }
 
-  return refuse(current.toString(), `more than ${maxRedirects} redirects`);
+  return refuse(current.toString(), `more than ${maxRedirects} redirects`, 'redirects');
 }
