@@ -61,8 +61,46 @@ for (const f of files) {
     if (m) secretHits.push(`${f}: ${label}`);
   }
 }
-if (secretHits.length) record('FAIL', 'secrets', secretHits.join('; '));
-else record('PASS', 'secrets', `${files.length} files scanned, nothing credential shaped`);
+/*
+ * A HIT IN A GITIGNORED FILE IS NOT A FINDING, AND THIS IS THE WHOLE POINT.
+ *
+ * The rule being enforced is "never COMMIT secrets". A gitignored `.env` is
+ * where a working key is supposed to live, so scanning it and failing means
+ * this check cannot pass on any correctly configured machine. Measured
+ * 2026-08-23, the first time a real `.env` existed: the run went red on an
+ * Apify token sitting exactly where it belongs. A security check that is
+ * always red is a security check everybody learns to skip, which costs more
+ * than the false positive does.
+ *
+ * So a hit is filtered only when git can confirm the file is ignored. If git
+ * is missing or this is not a repo, nothing is filtered and every hit stands,
+ * because the failure mode of guessing here is a committed credential.
+ *
+ * `.env.example` is committed and therefore never filtered. A real value in
+ * the template is a genuine leak, and it is the easiest one to make.
+ */
+const ignored = new Set();
+if (secretHits.length) {
+  try {
+    const paths = [...new Set(secretHits.map((h) => h.slice(0, h.indexOf(': '))))];
+    const out = execFileSync('git', ['check-ignore', '--stdin'], {
+      cwd: ROOT, input: paths.join('\n'), encoding: 'utf8',
+      /* git exits 1 when nothing matches, which is not an error here. */
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    for (const line of out.split('\n')) if (line.trim()) ignored.add(line.trim());
+  } catch (err) {
+    /* Exit 1 means no path was ignored. Anything else means git could not
+     * answer, and then nothing is filtered. */
+    if (err.status !== 1) ignored.clear();
+  }
+}
+
+const committable = secretHits.filter((h) => !ignored.has(h.slice(0, h.indexOf(': '))));
+const note = ignored.size ? `, ${ignored.size} hit(s) in gitignored files not counted` : '';
+
+if (committable.length) record('FAIL', 'secrets', committable.join('; '));
+else record('PASS', 'secrets', `${files.length} files scanned, nothing credential shaped${note}`);
 
 /* 2. gitignore coverage ----------------------------------------------------
  * A committed corpus or key is unrecoverable once the repo is public, so this
