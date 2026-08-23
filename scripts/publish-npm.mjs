@@ -30,7 +30,10 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const STAGING = join(ROOT, '.npm-staging');
 const TARBALLS = join(STAGING, 'tarballs');
-const VERSION = '0.1.0';
+/* One source of truth: the cli manifest, which the VERSION constant is tested
+ * against, so the constant, the manifests and the published version cannot
+ * drift apart without a test saying so. */
+const VERSION = JSON.parse(readFileSync(join(ROOT, 'packages/cli/package.json'), 'utf8')).version;
 const SCOPE = '@quorum-api';
 const REPO = 'https://github.com/Godzilla-lab/Quorum-API';
 
