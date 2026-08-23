@@ -125,8 +125,8 @@ call hangs, which is the shape of a real outage rather than a real benchmark.
 ## Against a hosted database
 
 Verified 2026-08-23 against **PostgreSQL 18** on an Aiven free instance, over
-TLS with SCRAM-SHA-256: both migrations applied and all 21 conformance
-behaviours passed. Until then the driver had only ever met a local PostgreSQL
+TLS with SCRAM-SHA-256. Both migrations applied and **every suite passes**:
+32 of 32 conformance, 10 of 10 row level security, 4 of 4 concurrency. Until then the driver had only ever met a local PostgreSQL
 17.10 over an unauthenticated socket.
 
 **Run it serially.** `npm run test:postgres` passes `--test-concurrency=1`
@@ -143,11 +143,22 @@ actually has tenants. Fixed by generating a password per run: 10 of 10 now pass
 against Aiven, so the boundary on `reports` is proven on real infrastructure
 rather than on a laptop.
 
-**Run the concurrency suite against a database near you.** It writes 1,200 rows
-across 8 writers and is latency bound, not contention bound. Measured from a
-laptop to Amsterdam the round trip is 174ms, about 1,700 times a local one, and
-the throughput it prints would be a measurement of the Atlantic. Put the app
-beside the database, which is what a deployment does anyway.
+**The concurrency suite passes, and it is latency bound.** 4 of 4 against
+Aiven, measured 2026-08-23 from a laptop with a 174ms round trip to Amsterdam:
+
+```
+8 concurrent writers stored 1200 of 1200 rows in 30892ms
+8 writers racing on 100 identical rows settled in 82537ms, no deadlock
+```
+
+The first number is round trips and nothing else: 150 rows per writer at 174ms
+is 26 seconds, which is essentially all of the 30.9 it took. The second costs
+more than latency alone because contended rows serialise on their locks, and
+the assertion there is that nothing deadlocked rather than that it was fast.
+
+So run it against a database near you. Across an ocean it measures the ocean.
+A deployment puts the app beside the database, which is why Render belongs in
+Frankfurt when Aiven is in Amsterdam.
 
 **`sslmode=require` does not verify the certificate.** That is libpq's
 definition and it is weaker than it reads: verification is a separate
