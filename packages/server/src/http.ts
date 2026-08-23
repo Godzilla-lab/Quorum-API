@@ -29,6 +29,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { meterFor, type Quotas } from './quotas.ts';
 import type { CorpusDriver, SourceId } from '@quorum/corpus';
 import { isReceiptId } from '@quorum/corpus';
 import { scoreKindOf, tierOf } from '@quorum/corpus/tiers';
@@ -44,6 +45,12 @@ export interface ServerOptions {
   keyHashes?: Map<string, string>;
   /* Open when no keys are configured, which is the self hosted default. */
   requireAuth?: boolean;
+  /*
+   * Per key rate limits. Absent means unlimited, which is right for a laptop
+   * and wrong for anything with a public hostname, so `bin.ts` always supplies
+   * one.
+   */
+  quotas?: Quotas;
   maxBodyBytes?: number;
   /*
    * Event loop lag, in milliseconds, above which the server SHEDS LOAD.
@@ -191,6 +198,7 @@ export function createReceiptsServer(options: ServerOptions): Server {
   });
 
   const queue = options.queue;
+  const quotas = options.quotas;
 
   /*
    * How long to wait before polling again. Honoured or not, it has to be said:
@@ -258,6 +266,37 @@ export function createReceiptsServer(options: ServerOptions): Server {
       method: 'GET',
       pattern: /^\/v1\/healthz$/,
       handler: async () => ({ status: 200, body: { ok: true } }),
+    },
+
+    /*
+     * What this key has used and what it is allowed. Specified in
+     * `spec/openapi.yaml` long before it was built, and the spec's reasoning
+     * is why there are two quotas rather than one.
+     */
+    {
+      method: 'GET',
+      pattern: /^\/v1\/usage$/,
+      handler: async (ctx) => {
+        if (!quotas) {
+          return {
+            status: 200,
+            body: {
+              keyPrefix: ctx.keyLabel,
+              periodStart: 0,
+              periodEnd: 0,
+              reports: { used: 0, limit: 0, remaining: 0 },
+              lookups: { used: 0, limit: 0, remaining: 0 },
+              concurrentReports: { running: 0, limit: 0 },
+              spendUsd: 0,
+              note: 'this instance runs without quotas, so nothing is counted',
+            },
+          };
+        }
+        /* No queue means reports are not served here at all, so nothing of this
+         * key's can be in flight. Zero is the true answer, not a fallback. */
+        const running = queue ? queue.runningFor(ctx.keyLabel) : 0;
+        return { status: 200, body: quotas.snapshot(ctx.keyLabel, running) };
+      },
     },
 
     {
@@ -615,6 +654,36 @@ export function createReceiptsServer(options: ServerOptions): Server {
             return;
           }
           keyLabel = label;
+        }
+
+        /*
+         * QUOTAS AFTER AUTH AND BEFORE ROUTING.
+         *
+         * After auth because a limit is per key and an unauthenticated request
+         * has no key to charge. Before routing because the cheapest possible
+         * refusal is the point: a 429 that first did the work it was refusing
+         * protects nothing.
+         */
+        let quotaHeaders: Record<string, string> = {};
+        if (quotas) {
+          const meter = meterFor(req.method ?? 'GET', url.pathname);
+          const decision = quotas.check(keyLabel, meter);
+          if (meter !== 'exempt') {
+            quotaHeaders = {
+              'x-ratelimit-limit': String(decision.state.limit),
+              'x-ratelimit-remaining': String(decision.state.remaining),
+              'x-ratelimit-reset': String(decision.retryAfterSeconds),
+            };
+          }
+          if (!decision.allowed) {
+            const e = error(429, 'rate_limited',
+              `too many ${meter} for this key. ${decision.state.used} used of ${decision.state.limit}. `
+              + `Retry in ${decision.retryAfterSeconds}s, or check GET /v1/usage.`,
+              requestId);
+            (e.body as { error: { retryAfterSeconds: number | null } }).error.retryAfterSeconds = decision.retryAfterSeconds;
+            send(e.status, e.body, { ...quotaHeaders, 'retry-after': String(decision.retryAfterSeconds) });
+            return;
+          }
         }
 
         const route = routes.find((r) => r.method === (req.method ?? 'GET') && r.pattern.test(url.pathname));

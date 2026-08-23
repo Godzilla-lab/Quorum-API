@@ -262,6 +262,9 @@ export interface JobQueue {
    * concurrent submits cannot both decide there is no run to join.
    */
   submit(request: ReportRequest, options: { keyLabel: string; idempotencyKey?: string }): Promise<SubmitResult>;
+  /* Reports this key has queued or running. The same count the per key cap
+   * refuses on, so a usage report and a 429 cannot disagree. */
+  runningFor(keyLabel: string): number;
   get(id: string): ReportSnapshot | null;
   /* Detaches this report. The run continues while any other report is still
    * attached to it. Returns null when the id names nothing. */
@@ -441,7 +444,22 @@ export function createJobQueue(options: QueueOptions): JobQueue {
     };
   }
 
+  /*
+   * Reports this key currently has queued or running.
+   *
+   * Shared by the per key cap below and by `GET /v1/usage`, so the number a
+   * caller is refused on and the number it is shown are the same number
+   * computed once. Two implementations of "in flight" is how a caller gets
+   * told it has one running while being refused for having three.
+   */
+  const inFlightFor = (keyLabel: string): number =>
+    [...reports.values()].filter(
+      (r) => r.keyLabel === keyLabel && (r.status === 'queued' || r.status === 'running'),
+    ).length;
+
   return {
+    runningFor: inFlightFor,
+
     async submit(request, { keyLabel, idempotencyKey }) {
       /* Swept on use rather than on a timer. A timer in a library is a handle
        * that keeps a process alive and surprises whoever embeds it. */
@@ -483,10 +501,8 @@ export function createJobQueue(options: QueueOptions): JobQueue {
         }
       }
 
-      const mine = [...reports.values()].filter(
-        (r) => r.keyLabel === keyLabel && (r.status === 'queued' || r.status === 'running'),
-      );
-      if (mine.length >= maxPerKey) {
+      const mine = inFlightFor(keyLabel);
+      if (mine >= maxPerKey) {
         return { ok: false, status: 429, message: `at most ${maxPerKey} reports may be in flight for one key` };
       }
 

@@ -54,6 +54,9 @@ All optional. Put them in a `.env` at the repo root, which is gitignored.
 | `QUORUM_API_KEYS` | Comma separated bearer keys for the server. **Absent means the instance is open**, which the server says out loud on boot. |
 | `QUORUM_CONCURRENCY` | Concurrent report runs, default 2. Not a throughput dial: every concurrent run is concurrent pressure on the same volunteer archives. |
 | `PORT` | Default 8787. A host normally sets this. |
+| `QUORUM_REPORTS_PER_MINUTE` | Reports one key may start per minute. Default 20. |
+| `QUORUM_LOOKUPS_PER_MINUTE` | Everything else, per key per minute. Default 600, which is 10 a second. |
+| `QUORUM_MAX_CAP_USD` | Ceiling on what one hosted report may spend. **Default 0**, and a caller's own `capUsd` can only lower it. |
 
 ## Three ways to use it
 
@@ -255,7 +258,35 @@ checkable, and it answers in single digit milliseconds against a warm corpus.
 | | |
 |---|---|
 | `POST /v1/verify` | Hand it claims with receipt ids and it re-resolves every one against the corpus. **It will verify our own output or anybody else's.** |
-| `GET /v1/healthz` | Liveness. Touches no database. |
+| `GET /v1/usage` | What this key has used and what it is allowed. |
+| `GET /v1/healthz` | Liveness. Touches no database, and is never rate limited. |
+
+### Limits
+
+Two quotas per key, not one, because a report is minutes of throttled upstream
+retrieval and an evidence lookup is one indexed read. A single shared limit
+either starves the lookups or leaves the reports unprotected.
+
+| | default |
+|---|---|
+| Reports started | 20 per minute |
+| Everything else | 600 per minute, which is 10 a second |
+| Reports in flight at once | 3 |
+
+Every answer carries `X-RateLimit-Limit`, `X-RateLimit-Remaining` and
+`X-RateLimit-Reset`, so a caller can pace itself before being refused rather
+than after. A refusal is a `429` with `Retry-After`, and **a refused request is
+not counted against the window**, or a client in a retry loop could never get
+back in.
+
+**Limits are on even when auth is off.** An instance with no keys has one
+caller by definition, so the allowance is shared rather than absent. The one
+thing a limit has to survive is somebody forgetting to configure it.
+
+**The metered ads leg is disabled on the hosted path entirely**, alongside
+synthesis and image reading, and a report may spend at most `QUORUM_MAX_CAP_USD`
+which defaults to zero. A caller's own `capUsd` can lower that and never raise
+it. Nobody holding a key can spend the operator's money.
 
 `POST /v1/verify` is the endpoint that makes the rest falsifiable. If a claim
 cites a record that does not exist, this says so, and it says so about our

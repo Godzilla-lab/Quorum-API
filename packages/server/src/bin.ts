@@ -29,6 +29,7 @@ import { isWarm } from '@quorum/corpus/constants';
 import { runResearch, type RunResult } from '@quorum/cli';
 import { SOURCE_IDS, findProductByName, makeAdSource, makeSource, resolveSubject } from '@quorum/sources';
 import { createReceiptsServer, hashKey } from './http.ts';
+import { createQuotas, DEFAULT_LIMITS } from './quotas.ts';
 import { createJobQueue, type ReportRequest, type RunOutcome } from './jobs.ts';
 import type { RetrievalResult } from '@quorum/core';
 import { computeClaims } from './claims.ts';
@@ -45,6 +46,14 @@ const keyHashes = new Map(keys.map((k, i) => [hashKey(k), `key-${i + 1}`]));
  * keeps us welcome there. Raising it raises their load, not ours.
  */
 const concurrency = Number(process.env['QUORUM_CONCURRENCY'] ?? 2);
+
+/*
+ * The most a single hosted report may spend, whatever the caller asked for.
+ * Zero by default, because every metered leg is currently disabled on this
+ * path and a default that permits spending is how an operator discovers a bill
+ * rather than deciding on one.
+ */
+const maxCapUsd = Number(process.env['QUORUM_MAX_CAP_USD'] ?? 0);
 
 const corpus = openSqliteCorpus({ path: corpusPath });
 
@@ -69,7 +78,23 @@ const queue = createJobQueue({
         terms: request.terms,
         communities: request.communities,
         sources: request.sources.length ? request.sources : [...SOURCE_IDS],
-        adSources: request.includeAds ? ['meta-ads-apify'] : [],
+        /*
+         * NEVER FROM THE HOSTED PATH, and `includeAds` is accepted and ignored.
+         *
+         * This read `request.includeAds ? ['meta-ads-apify'] : []` until
+         * 2026-08-23, which meant any caller holding a key could post
+         * `{"includeAds": true}` and run metered Apify calls on the operator's
+         * account, as fast as the queue would take them. `synthesise` and
+         * `readImages` were already hardcoded false below for exactly this
+         * reason and the ads leg was the one that got missed.
+         *
+         * The flag stays in the request schema rather than becoming a 400,
+         * because rejecting it would break callers who send it harmlessly, and
+         * because a spend decision belongs to whoever pays the bill. When the
+         * hosted tier meters ads per tenant this becomes a quota rather than a
+         * constant.
+         */
+        adSources: [],
         corpusPath,
         maxQueriesPerSource: 6,
         maxRecordsTotal: 20_000,
@@ -80,7 +105,13 @@ const queue = createJobQueue({
          */
         compare: [],
         deadlineMs: request.deadlineMs ?? 60 * 60_000,
-        capUsd: request.capUsd,
+        /*
+         * THE CALLER'S CAP IS A CEILING REQUEST, NOT A GRANT. It can only ever
+         * lower the operator's own limit, never raise it, and an absent one
+         * gets the operator's rather than no cap at all, which is what
+         * `undefined` used to mean here.
+         */
+        capUsd: Math.min(request.capUsd ?? maxCapUsd, maxCapUsd),
         offline: request.offline,
         readImages: false,
         maxImages: 2,
@@ -140,7 +171,20 @@ const queue = createJobQueue({
   },
 });
 
-const server = createReceiptsServer({ corpus, keyHashes, requireAuth: keyHashes.size > 0, queue });
+/*
+ * Limits are ALWAYS ON, including on an open instance. An instance without
+ * keys has one caller by definition, so the allowance is shared rather than
+ * absent, and the one thing a limit must survive is somebody forgetting to
+ * configure it.
+ */
+const limits = {
+  ...DEFAULT_LIMITS,
+  reportsPerWindow: Number(process.env['QUORUM_REPORTS_PER_MINUTE'] ?? DEFAULT_LIMITS.reportsPerWindow),
+  lookupsPerWindow: Number(process.env['QUORUM_LOOKUPS_PER_MINUTE'] ?? DEFAULT_LIMITS.lookupsPerWindow),
+};
+const quotas = createQuotas(limits);
+
+const server = createReceiptsServer({ corpus, keyHashes, requireAuth: keyHashes.size > 0, queue, quotas });
 
 server.listen(port, () => {
   process.stderr.write(`quorum api on http://localhost:${port}, corpus ${corpusPath}\n`);
@@ -148,8 +192,16 @@ server.listen(port, () => {
     process.stderr.write('no QUORUM_API_KEYS set, so this instance is OPEN. Fine on a laptop, not on a network.\n');
   }
   process.stderr.write(`reports: live, ${concurrency} concurrent runs, coalesced by subject\n`);
+  /* The CONFIGURED numbers, not the defaults. This printed the defaults until
+   * 2026-08-23 and cheerfully announced 600 while enforcing 10, which is worse
+   * than printing nothing: it is a log that has to be distrusted. */
+  process.stderr.write(
+    `limits: ${limits.reportsPerWindow} reports and ${limits.lookupsPerWindow} lookups `
+    + `per key per minute. Ads are disabled on this path and a report may spend at most $${maxCapUsd}.\n`,
+  );
   process.stderr.write('live: /v1/reports /v1/reports/:id /v1/reports/:id/stream /v1/healthz /v1/evidence/:id\n');
-  process.stderr.write('      /v1/evidence/batch /v1/evidence/search /v1/verify /v1/categories/:slug /v1/evidence/ads/:id\n');
+  process.stderr.write('      /v1/evidence/batch /v1/evidence/search /v1/verify /v1/categories/:slug\n');
+  process.stderr.write('      /v1/evidence/ads/:id /v1/usage\n');
 });
 
 const shutdown = (): void => {
