@@ -10,6 +10,15 @@
  *
  * It is not a token skip. Every test in the shared conformance suite runs
  * against a real server when the variable is set, in a schema of its own that
+ * RUN THIS SERIALLY. `npm run test:postgres` passes --test-concurrency=1, and
+ * it has to: the harness opens a connection per test, node:test defaults to one
+ * worker per core, and a managed database allows far fewer connections than a
+ * laptop has cores. Measured 2026-08-23 against an Aiven free instance with a
+ * 20 connection limit: 18 of 32 tests failed in parallel and all 32 passed
+ * serially. The schema was never the problem, and eighteen red tests that mean
+ * "too many connections" read exactly like eighteen red tests that mean "the
+ * driver is broken".
+ *
  * is dropped afterwards, using the migrations in `packages/corpus/migrations`
  * exactly as a deployment would apply them.
  *

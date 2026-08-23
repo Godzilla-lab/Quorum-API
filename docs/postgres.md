@@ -121,3 +121,36 @@ Nothing about this database at production scale, only at development scale on
 one machine. In particular there is no measurement of connection pool exhaustion
 and no test of what happens when a report's transaction is open while a vendor
 call hangs, which is the shape of a real outage rather than a real benchmark.
+
+## Against a hosted database
+
+Verified 2026-08-23 against **PostgreSQL 18** on an Aiven free instance, over
+TLS with SCRAM-SHA-256: both migrations applied and all 21 conformance
+behaviours passed. Until then the driver had only ever met a local PostgreSQL
+17.10 over an unauthenticated socket.
+
+**Run it serially.** `npm run test:postgres` passes `--test-concurrency=1`
+because the harness opens a connection per test while node:test defaults to one
+worker per core. The first parallel run against a 20 connection instance failed
+18 of 32 tests, and every one of those failures was connection exhaustion
+wearing the costume of a broken driver.
+
+**The RLS suite needs a password for its tenant role.** It creates a role and
+logs in as it, and `CREATE ROLE ... LOGIN` with no password works on a local
+trust authenticated server and fails with `28P01` on every managed one. That
+meant the tenant isolation policies had never been verified anywhere that
+actually has tenants. Fixed by generating a password per run: 10 of 10 now pass
+against Aiven, so the boundary on `reports` is proven on real infrastructure
+rather than on a laptop.
+
+**Run the concurrency suite against a database near you.** It writes 1,200 rows
+across 8 writers and is latency bound, not contention bound. Measured from a
+laptop to Amsterdam the round trip is 174ms, about 1,700 times a local one, and
+the throughput it prints would be a measurement of the Atlantic. Put the app
+beside the database, which is what a deployment does anyway.
+
+**`sslmode=require` does not verify the certificate.** That is libpq's
+definition and it is weaker than it reads: verification is a separate
+escalation to `verify-ca` or `verify-full`. A provider hands you `require` in
+the uri it tells you to copy. Point `QUORUM_PG_CA` at the provider CA to
+verify properly, and the migrate runner will say which of the two you got.

@@ -28,6 +28,7 @@
  * needs a role that can CREATE ROLE.
  */
 
+import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -45,9 +46,27 @@ if (!PG_URL) {
   /* Parsed, not split: a hosted url needs its sslmode honoured and its
    * password decoded. See parsePgUri. */
   const connection = parsePgUri(PG_URL);
-  /* Same connection, different role: this suite proves the policies by logging
-   * in as a tenant rather than as the owner. */
-  const connect = (user: string): Promise<PgWireClient> => connectPgWire({ ...connection, user });
+  /*
+   * Same connection, different role: this suite proves the policies by logging
+   * in as a tenant rather than as the owner.
+   *
+   * THE TENANT ROLE NEEDS ITS OWN PASSWORD, and that is not a detail. Against a
+   * local server using trust authentication, `CREATE ROLE ... LOGIN` with no
+   * password logs in happily and this suite passed for months. Against any
+   * managed database it fails with 28P01, because password authentication is
+   * the only kind on offer. Measured 2026-08-23 against Aiven: the suite could
+   * not run at all, which meant the tenant isolation policies had never been
+   * verified anywhere that has tenants.
+   *
+   * Generated per run rather than fixed, so a role left behind by a crashed run
+   * cannot be logged into by the next one.
+   */
+  const tenantPassword = randomBytes(18).toString('hex');
+  const connect = (user: string): Promise<PgWireClient> => connectPgWire(
+    user === connection.user
+      ? connection
+      : { ...connection, user, password: tenantPassword },
+  );
 
   const OWNER = connection.user;
   const schema = `rls_${process.pid}`;
@@ -74,7 +93,7 @@ if (!PG_URL) {
     await owner.exec(`
       DO $$ BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${tenantRole}') THEN
-          CREATE ROLE ${tenantRole} LOGIN;
+          CREATE ROLE ${tenantRole} LOGIN PASSWORD '${tenantPassword}';
         END IF;
       END $$;
     `);

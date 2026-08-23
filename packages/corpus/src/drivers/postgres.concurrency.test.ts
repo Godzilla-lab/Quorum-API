@@ -41,8 +41,20 @@ import type { CorpusDriver, DocInput } from '../index.ts';
 const PG_URL = process.env['QUORUM_PG_URL'];
 const MIGRATIONS = join(fileURLToPath(new URL('.', import.meta.url)), '../../migrations');
 
-/* Eight writers and 150 rows each, so the disjoint case writes 1200 rows. The
- * same 1200 the SQLite measurement used, so the two numbers compare. */
+/*
+ * Eight writers and 150 rows each, so the disjoint case writes 1200 rows. The
+ * same 1200 the SQLite measurement used, so the two numbers compare.
+ *
+ * RUN THIS AGAINST A DATABASE NEAR YOU. It is calibrated for a local server at
+ * about 0.1ms, and it is latency bound rather than concurrency bound: the work
+ * is round trips, not contention. Measured 2026-08-23 from a laptop to an Aiven
+ * instance in Amsterdam, the round trip was 174ms, roughly 1,700 times a local
+ * one, and the suite blew through a 90 second timeout.
+ *
+ * That is not a driver defect and the throughput it would print is not a
+ * finding, because across an ocean this measures the ocean. A deployment puts
+ * the app beside the database, which is the case worth measuring.
+ */
 const WRITERS = 8;
 const ROWS_PER_WRITER = 150;
 

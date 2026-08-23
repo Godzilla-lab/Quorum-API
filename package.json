@@ -22,7 +22,7 @@
     "check:drift:fixtures": "node scripts/check-drift.mjs --fixtures",
     "check:spec": "node --disable-warning=ExperimentalWarning scripts/check-spec.mjs",
     "check:parity": "node --disable-warning=ExperimentalWarning scripts/parity.mjs",
-    "test:postgres": "node --disable-warning=ExperimentalWarning --test \"packages/corpus/src/drivers/postgres.{conformance,rls,concurrency}.test.ts\""
+    "test:postgres": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"packages/corpus/src/drivers/postgres.{conformance,rls,concurrency}.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
