@@ -1,5 +1,10 @@
 # Quorum
 
+[![CI](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml/badge.svg)](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
+[![Tests](https://img.shields.io/badge/tests-1017%20passing-brightgreen.svg)](#development)
+
 **Market evidence with receipts.** Give it a product URL, get back what a market
 actually says: voice of customer from public archives, competitor ads ranked by
 how long they have been running, and a video versus static verdict computed as
@@ -21,10 +26,25 @@ record you can fetch back.
 posted, when, and its permalink. A customer of your customer can click a claim
 and read the human who said it.
 
-> **Status: working, unpublished.** The pipeline runs end to end, 953 tests pass
-> offline with no keys, and the Postgres schema is applied and verified against
-> a real PostgreSQL 18. Not on npm, and nothing is deployed. The MCP server and
-> the JavaScript SDK are placeholders. Do not depend on the API shape yet.
+## Status
+
+| | |
+|---|---|
+| **Engine** | Working. 1,017 tests, offline and keyless |
+| **Hosted API** | **Deployed and live**, on PostgreSQL 18 with TLS verified |
+| **CLI** | Working, every flag |
+| **MCP server** | Working, five tools over stdio |
+| **JavaScript SDK** | Working, 11 methods |
+| **npm** | Not published |
+| **Corpus** | Nearly empty. The engine works; there is little in it yet |
+
+**Do not depend on the API shape yet.** It is stable enough to build against
+and not yet frozen.
+
+Not built, and named rather than left as a surprise: `webhookUrl` is accepted
+by `POST /v1/reports` and never delivered, the eval harness in the testing
+section below does not exist, and rate limits are held in memory so they reset
+on restart and would not hold across two instances.
 
 ## Requirements
 
@@ -62,6 +82,31 @@ All optional. Put them in a `.env` at the repo root, which is gitignored.
 | `QUORUM_SPEND_PER_KEY_USD` | What one key may spend on metered sources per day. Default 0. |
 | `QUORUM_SPEND_TOTAL_USD` | What **every** key together may spend per day. Default 0. |
 
+## What it looks like
+
+Real output, from a corpus of 100,000 records:
+
+```
+EVIDENCE  a claim needs 3 independent receipts to be stated as a finding
+
+  sizing        200 receipts /  40 channels   FINDING
+                "the sizing on these runs small, had to size up"
+                rc_a8697befab91e873  reddit r/place22  2023-04-16
+
+VERSUS    alpha shoes against 1 rival
+          each retrieved as a corpus of its own, so no number here is co-occurrence
+
+  sizing      LOUDER FOR alpha shoes
+              alpha shoes         45.0%   45 of 100 records, 45 channels, finding
+              beta shoes           5.0%    5 of 100 records,  5 channels, finding
+
+RECEIPTS  47 cited, 47 resolved back to real records
+```
+
+Every id in that output is fetchable. `GET /v1/evidence/rc_a8697befab91e873`
+returns the comment, its score, its permalink and its date. If an id does not
+resolve, the run exits non zero and says which one.
+
 ## Three ways to use it
 
 | | what it is | who runs it |
@@ -88,7 +133,7 @@ Requires **Node 22.18 or newer**, and nothing else.
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 953 tests, offline, no keys
+npm test          # 1,017 tests, offline, no keys
 ```
 
 Nothing above needs a key, and `--offline` never touches the network at all.
@@ -390,6 +435,17 @@ amount of money brings it back. Shopify drops delisted products from
 cache, it is the only copy that will ever exist, and only because something was
 recording on the day.
 
+
+## Documentation
+
+| | |
+|---|---|
+| [`spec/openapi.yaml`](spec/openapi.yaml) | The API contract. The SDK is written against it |
+| [`docs/postgres.md`](docs/postgres.md) | Running on Postgres, and what was found verifying it |
+| [`docs/rate-limits.md`](docs/rate-limits.md) | Every upstream, what it does when pushed, and what we do about it |
+| [`bench/README.md`](bench/README.md) | Load and abuse testing, with the defects it found |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Adding a source, which is the main way to help |
+| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability |
 
 ## How it is licensed
 
