@@ -61,7 +61,7 @@ All optional. Put them in a `.env` at the repo root, which is gitignored.
 |---|---|---|
 | **CLI** | The whole engine on your machine, against a corpus you own | You |
 | **Hosted API** | The same engine against a **shared, already warm** corpus | Us |
-| **MCP server** | The API as tools an agent can call | **Not built yet** |
+| **MCP server** | Five tools an agent can call | You, over stdio |
 
 They are the same pipeline. The only thing the hosted API sells that the source
 cannot is a corpus somebody already paid to fill: cold retrieval measured 596
@@ -142,9 +142,43 @@ See `docs/postgres.md`.
 
 ### MCP
 
-Not built. `packages/mcp` is a placeholder, and when it lands it will be a
-client over the hosted API rather than a second implementation, so it inherits
-the same keys and the same limits.
+Five tools over stdio, spoken as JSON-RPC with **no dependency**, the same call
+this repo makes everywhere else.
+
+```bash
+QUORUM_CORPUS=./quorum.db node packages/mcp/src/bin.ts
+```
+
+| tool | answers |
+|---|---|
+| `search_evidence` | How many independent records exist, across how many channels, whether that clears the threshold, and the loudest few quotes |
+| `get_receipt` | Resolves ids to the real records. **This is how an agent checks us** |
+| `category_warmth` | Whether asking is instant and free, or minutes and expensive |
+| `compare_formats` | Video versus static, from how long real ads ran |
+| `research_product` | A full report. **Off unless `QUORUM_MCP_RESEARCH=1`** |
+
+Three decisions worth knowing, because the tool schema is the expensive part to
+change later:
+
+**Five tools, not one per endpoint.** A tool definition costs 100 to 500 tokens
+on every turn, so a server mirroring ten routes spends the context window
+before the model has done anything.
+
+**Aggregated, never a row dump.** `search_evidence` returns counts and a
+handful of quotes. A research tool that streams a corpus into a context window
+has spent the budget it was meant to save.
+
+**Markdown, not JSON**, at roughly 60% of the tokens for the same content.
+
+`research_product` is off by default because a report is minutes of throttled
+retrieval against volunteer archives, and an agent should not be able to start
+one by accident. The other four answer from what is already held and touch no
+network.
+
+The payoff is a thing no other research server can offer: **the calling agent
+can independently verify every claim.** `search_evidence` cites ids and
+`get_receipt` resolves them, so an id that does not resolve is a claim that was
+never real, and it is the loudest line in the response when it happens.
 
 ## What the API does
 

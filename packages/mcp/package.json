@@ -12,5 +12,14 @@
   },
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\""
+  },
+  "bin": {
+    "quorum-mcp": "./src/bin.ts"
+  },
+  "dependencies": {
+    "@quorum/core": "*",
+    "@quorum/corpus": "*",
+    "@quorum/cli": "*",
+    "@quorum/sources": "*"
   }
 }
