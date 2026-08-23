@@ -48,12 +48,22 @@ const keyHashes = new Map(keys.map((k, i) => [hashKey(k), `key-${i + 1}`]));
 const concurrency = Number(process.env['QUORUM_CONCURRENCY'] ?? 2);
 
 /*
- * The most a single hosted report may spend, whatever the caller asked for.
- * Zero by default, because every metered leg is currently disabled on this
- * path and a default that permits spending is how an operator discovers a bill
- * rather than deciding on one.
+ * THREE CEILINGS ON METERED WORK, AND EACH ONE STOPS A DIFFERENT DISASTER.
+ *
+ *   per report    one runaway report cannot drain the budget by itself
+ *   per key       one caller cannot drain it either
+ *   per instance  ALL callers together cannot, which is the only one that
+ *                 holds when the metered leg is open to everyone. Without it
+ *                 the real ceiling is the per key figure times however many
+ *                 keys exist, which is not a ceiling.
+ *
+ * ALL DEFAULT TO ZERO, WHICH LEAVES ADS OFF. An operator who has not set a
+ * budget has not agreed to a bill, so forgetting produces a report without ads
+ * rather than an invoice.
  */
 const maxCapUsd = Number(process.env['QUORUM_MAX_CAP_USD'] ?? 0);
+const spendPerKeyUsd = Number(process.env['QUORUM_SPEND_PER_KEY_USD'] ?? 0);
+const spendTotalUsd = Number(process.env['QUORUM_SPEND_TOTAL_USD'] ?? 0);
 
 const corpus = openSqliteCorpus({ path: corpusPath });
 
@@ -67,6 +77,28 @@ const queue = createJobQueue({
   concurrency,
 
   async runReport(request: ReportRequest, ctx): Promise<RunOutcome> {
+    /*
+     * METERED SOURCES, ASKED FOR AND PAID FOR.
+     *
+     * The caller asks with `includeAds`, and the budget decides. Checked here,
+     * before the run, because a charge that lands after the money is gone is
+     * an audit trail rather than a limit.
+     *
+     * A refusal is NOT an error. The report still runs and still answers, it
+     * just answers without the metered leg, and the degradation list says so.
+     * Failing the whole report because a budget ran out would throw away
+     * minutes of free retrieval over an optional extra.
+     */
+    const spend = request.includeAds ? quotas.canSpend(ctx.keyLabel) : null;
+    const adsAllowed = spend?.allowed === true;
+    if (request.includeAds && !adsAllowed && spend) {
+      ctx.onDegraded({
+        source: 'meta-ads-apify',
+        reason: spend.reason,
+        impact: 'the report has no competitor ad evidence in it',
+      });
+    }
+
     /*
      * A FRESH CORPUS HANDLE PER RUN, because `runResearch` closes the corpus it
      * was given in a `finally`. Handing it the long lived one would close the
@@ -94,7 +126,7 @@ const queue = createJobQueue({
          * hosted tier meters ads per tenant this becomes a quota rather than a
          * constant.
          */
-        adSources: [],
+        adSources: adsAllowed ? ['meta-ads-apify'] : [],
         corpusPath,
         maxQueriesPerSource: 6,
         maxRecordsTotal: 20_000,
@@ -111,7 +143,17 @@ const queue = createJobQueue({
          * gets the operator's rather than no cap at all, which is what
          * `undefined` used to mean here.
          */
-        capUsd: Math.min(request.capUsd ?? maxCapUsd, maxCapUsd),
+        /*
+         * THE TIGHTEST OF FOUR NUMBERS. The caller's own request, the per
+         * report ceiling, and whatever is left of both the key's allowance and
+         * the instance budget. A caller's capUsd can only ever lower this.
+         */
+        capUsd: Math.min(
+          request.capUsd ?? Number.POSITIVE_INFINITY,
+          maxCapUsd,
+          spend?.keyRemainingUsd ?? maxCapUsd,
+          spend?.instanceRemainingUsd ?? maxCapUsd,
+        ),
         offline: request.offline,
         readImages: false,
         maxImages: 2,
@@ -133,6 +175,14 @@ const queue = createJobQueue({
         onProgress: (line) => ctx.onStage('progress', line),
       },
     );
+
+    /*
+     * CHARGED FROM WHAT THE RUN ACTUALLY SPENT, not from an estimate and not
+     * from what was authorised. The cost meter is the only thing that knows,
+     * and it is charged whether the run succeeded or degraded, because a
+     * vendor bills for a call that returned nothing useful just the same.
+     */
+    if (result.cost.totalUsd > 0) quotas.charge(ctx.keyLabel, result.cost.totalUsd);
 
     for (const degradation of result.retrieval?.degraded ?? []) ctx.onDegraded(degradation);
 
@@ -181,6 +231,8 @@ const limits = {
   ...DEFAULT_LIMITS,
   reportsPerWindow: Number(process.env['QUORUM_REPORTS_PER_MINUTE'] ?? DEFAULT_LIMITS.reportsPerWindow),
   lookupsPerWindow: Number(process.env['QUORUM_LOOKUPS_PER_MINUTE'] ?? DEFAULT_LIMITS.lookupsPerWindow),
+  spendPerKeyUsd,
+  spendTotalUsd,
 };
 const quotas = createQuotas(limits);
 
@@ -197,7 +249,14 @@ server.listen(port, () => {
    * than printing nothing: it is a log that has to be distrusted. */
   process.stderr.write(
     `limits: ${limits.reportsPerWindow} reports and ${limits.lookupsPerWindow} lookups `
-    + `per key per minute. Ads are disabled on this path and a report may spend at most $${maxCapUsd}.\n`,
+    + `per key per minute\n`,
+  );
+  process.stderr.write(
+    spendTotalUsd > 0 && spendPerKeyUsd > 0
+      ? `budget: metered sources ON. $${spendPerKeyUsd} per key and $${spendTotalUsd} per instance `
+        + `per day, at most $${maxCapUsd} in any one report\n`
+      : 'budget: metered sources OFF, so ads are skipped. Set QUORUM_SPEND_PER_KEY_USD, '
+        + 'QUORUM_SPEND_TOTAL_USD and QUORUM_MAX_CAP_USD to enable them.\n',
   );
   process.stderr.write('live: /v1/reports /v1/reports/:id /v1/reports/:id/stream /v1/healthz /v1/evidence/:id\n');
   process.stderr.write('      /v1/evidence/batch /v1/evidence/search /v1/verify /v1/categories/:slug\n');

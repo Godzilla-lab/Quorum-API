@@ -65,6 +65,14 @@ export interface RunContext {
    * between queries rather than only at the start, because a cancelled run has
    * to stop SPENDING and on a metered source that is money. */
   signal: AbortSignal;
+  /*
+   * The key that STARTED this run, which is who pays for any metered work in
+   * it. A coalesced run is shared by every caller who joined, and they ride
+   * free: that is what coalescing is for, and splitting a bill across joiners
+   * who arrived at different times would be arbitrary in a way nobody could
+   * predict or check. Whoever caused the spend is charged for it.
+   */
+  keyLabel: string;
   onStage(name: string, detail?: string): void;
   onDegraded(degradation: unknown): void;
 }
@@ -178,6 +186,8 @@ export function coalescingKey(request: ReportRequest): string {
 
 interface Run {
   key: string;
+  /* The key label of the first caller to ask for this. See RunContext. */
+  initiator: string;
   status: ReportStatus;
   /* Terms this run planned upstream. A joiner arriving after this is set gets
    * its extra terms back in `termsDeferred` rather than a silent thin answer. */
@@ -375,6 +385,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
             runRequest(run),
             {
               signal: run.controller.signal,
+              keyLabel: run.initiator,
               onStage: (stage, detail) => emitToRun(run, 'stage', { stage, ...(detail ? { detail } : {}) }),
               onDegraded: (degradation) => emitToRun(run, 'degraded', degradation),
             },
@@ -532,6 +543,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
         }
         run = {
           key,
+          initiator: keyLabel,
           status: 'queued',
           plannedTerms: [...request.terms],
           planned: false,

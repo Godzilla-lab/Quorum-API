@@ -45,6 +45,10 @@ export interface UsageSnapshot {
   spendUsd: number;
 }
 
+/* Why a spend request was refused, so the caller is told which ceiling it hit
+ * rather than a generic no. */
+export type SpendRefusal = 'per-key' | 'instance' | 'disabled' | null;
+
 export interface QuotaLimits {
   /* Reports started per window. Small: each one is minutes of upstream work. */
   reportsPerWindow: number;
@@ -54,6 +58,28 @@ export interface QuotaLimits {
    * here so a caller sees all three ceilings in one place. */
   concurrentReports: number;
   windowMs: number;
+  /*
+   * METERED SPEND, IN DOLLARS, AND THE ONLY LIMIT HERE THAT BOUNDS A BILL.
+   *
+   * A rate limit bounds how OFTEN, never how MUCH. Twenty reports a minute
+   * with the ads leg on is twenty metered vendor runs a minute, which a rate
+   * limit permits happily and at a measured pace. These two are what stop a
+   * balance disappearing.
+   *
+   * `spendPerKeyUsd` bounds one caller. `spendTotalUsd` bounds EVERY caller
+   * together, and it is the one that matters when the ads leg is open to
+   * everyone: without it, the ceiling is the per key figure multiplied by
+   * however many keys exist, which is not a ceiling.
+   *
+   * BOTH DEFAULT TO ZERO, WHICH DISABLES METERED WORK. An operator who has not
+   * thought about a budget has one of zero, so the failure mode of forgetting
+   * is a report without ads rather than a bill.
+   */
+  spendPerKeyUsd: number;
+  spendTotalUsd: number;
+  /* The spend window, separate from the request window: nobody budgets by the
+   * minute, and a day is how a vendor bills. */
+  spendWindowMs: number;
 }
 
 export const DEFAULT_LIMITS: QuotaLimits = {
@@ -74,6 +100,10 @@ export const DEFAULT_LIMITS: QuotaLimits = {
   lookupsPerWindow: 600,
   concurrentReports: 3,
   windowMs: 60_000,
+  /* Zero until an operator says otherwise. See the field comments. */
+  spendPerKeyUsd: 0,
+  spendTotalUsd: 0,
+  spendWindowMs: 24 * 60 * 60_000,
 };
 
 /* What a request counts against. A report is expensive, everything else is
@@ -82,6 +112,10 @@ export type Meter = 'reports' | 'lookups' | 'exempt';
 
 interface KeyRecord {
   windowStart: number;
+  /* Rolls on its own schedule, because a budget is daily and a rate is per
+   * minute. Sharing one window would reset the budget every minute. */
+  spendWindowStart: number;
+  spendInWindow: number;
   reports: number;
   lookups: number;
   /* Lifetime, not windowed. This is the "what did they use" half. */
@@ -101,9 +135,26 @@ export interface Decision {
   state: QuotaState;
 }
 
+export interface SpendDecision {
+  allowed: boolean;
+  refusedBy: SpendRefusal;
+  /* What this key may still spend in the window, and what everyone may. The
+   * smaller of the two is the real ceiling for the next call. */
+  keyRemainingUsd: number;
+  instanceRemainingUsd: number;
+  reason: string;
+}
+
 export interface Quotas {
   /* Count one request and say whether it may proceed. */
   check(keyLabel: string, meter: Meter, now?: number): Decision;
+  /*
+   * May this key start metered work, and for how much.
+   *
+   * Asked BEFORE the work rather than after, because a charge that arrives
+   * after the money is gone is an audit trail rather than a limit.
+   */
+  canSpend(keyLabel: string, now?: number): SpendDecision;
   /* Charge money to a key, so usage reports what a caller actually cost. */
   charge(keyLabel: string, usd: number, now?: number): void;
   /* What `GET /v1/usage` returns. */
@@ -114,12 +165,17 @@ export interface Quotas {
 
 export function createQuotas(limits: QuotaLimits = DEFAULT_LIMITS): Quotas {
   const keys = new Map<string, KeyRecord>();
+  /* The instance total, tracked apart from any key, because the thing it
+   * protects is a single vendor balance shared by all of them. */
+  let instanceWindowStart = 0;
+  let instanceSpend = 0;
 
   const record = (keyLabel: string, now: number): KeyRecord => {
     let rec = keys.get(keyLabel);
     if (!rec) {
       rec = {
-        windowStart: now, reports: 0, lookups: 0,
+        windowStart: now, spendWindowStart: now, spendInWindow: 0,
+        reports: 0, lookups: 0,
         totalReports: 0, totalLookups: 0, spendUsd: 0,
         firstSeen: now, lastSeen: now,
       };
@@ -134,6 +190,10 @@ export function createQuotas(limits: QuotaLimits = DEFAULT_LIMITS): Quotas {
       rec.windowStart = now;
       rec.reports = 0;
       rec.lookups = 0;
+    }
+    if (now - rec.spendWindowStart >= limits.spendWindowMs) {
+      rec.spendWindowStart = now;
+      rec.spendInWindow = 0;
     }
     rec.lastSeen = now;
     return rec;
@@ -174,9 +234,55 @@ export function createQuotas(limits: QuotaLimits = DEFAULT_LIMITS): Quotas {
       };
     },
 
+    canSpend(keyLabel, now = Date.now()) {
+      const rec = record(keyLabel, now);
+      if (now - instanceWindowStart >= limits.spendWindowMs) {
+        instanceWindowStart = now;
+        instanceSpend = 0;
+      }
+
+      const keyRemainingUsd = Math.max(0, limits.spendPerKeyUsd - rec.spendInWindow);
+      const instanceRemainingUsd = Math.max(0, limits.spendTotalUsd - instanceSpend);
+
+      if (limits.spendPerKeyUsd <= 0 || limits.spendTotalUsd <= 0) {
+        return {
+          allowed: false, refusedBy: 'disabled', keyRemainingUsd: 0, instanceRemainingUsd: 0,
+          reason: 'metered sources are disabled on this instance, so the report ran without them',
+        };
+      }
+      if (keyRemainingUsd <= 0) {
+        return {
+          allowed: false, refusedBy: 'per-key', keyRemainingUsd, instanceRemainingUsd,
+          reason: `this key has spent its $${limits.spendPerKeyUsd} allowance for the period`,
+        };
+      }
+      if (instanceRemainingUsd <= 0) {
+        /* Named separately from the per key case on purpose: "you are out" and
+         * "everybody is out" are different problems and only one of them is
+         * the caller's to solve. */
+        return {
+          allowed: false, refusedBy: 'instance', keyRemainingUsd, instanceRemainingUsd,
+          reason: `this instance has spent its $${limits.spendTotalUsd} budget for the period`,
+        };
+      }
+      return {
+        allowed: true, refusedBy: null, keyRemainingUsd, instanceRemainingUsd,
+        reason: `up to $${Math.min(keyRemainingUsd, instanceRemainingUsd).toFixed(4)} available`,
+      };
+    },
+
     charge(keyLabel, usd, now = Date.now()) {
       if (!Number.isFinite(usd) || usd <= 0) return;
-      record(keyLabel, now).spendUsd += usd;
+      const rec = record(keyLabel, now);
+      if (now - instanceWindowStart >= limits.spendWindowMs) {
+        instanceWindowStart = now;
+        instanceSpend = 0;
+      }
+      /* Lifetime and windowed, both. The first answers "what did this caller
+       * cost", the second enforces the budget. */
+      rec.spendUsd += usd;
+      rec.spendInWindow += usd;
+      instanceSpend += usd;
     },
 
     snapshot(keyLabel, running, now = Date.now()) {

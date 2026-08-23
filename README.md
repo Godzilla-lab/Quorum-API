@@ -56,7 +56,9 @@ All optional. Put them in a `.env` at the repo root, which is gitignored.
 | `PORT` | Default 8787. A host normally sets this. |
 | `QUORUM_REPORTS_PER_MINUTE` | Reports one key may start per minute. Default 20. |
 | `QUORUM_LOOKUPS_PER_MINUTE` | Everything else, per key per minute. Default 600, which is 10 a second. |
-| `QUORUM_MAX_CAP_USD` | Ceiling on what one hosted report may spend. **Default 0**, and a caller's own `capUsd` can only lower it. |
+| `QUORUM_MAX_CAP_USD` | Ceiling on any one report. A caller's own `capUsd` can only lower it. Default 0. |
+| `QUORUM_SPEND_PER_KEY_USD` | What one key may spend on metered sources per day. Default 0. |
+| `QUORUM_SPEND_TOTAL_USD` | What **every** key together may spend per day. Default 0. |
 
 ## Three ways to use it
 
@@ -283,10 +285,41 @@ back in.
 caller by definition, so the allowance is shared rather than absent. The one
 thing a limit has to survive is somebody forgetting to configure it.
 
-**The metered ads leg is disabled on the hosted path entirely**, alongside
-synthesis and image reading, and a report may spend at most `QUORUM_MAX_CAP_USD`
-which defaults to zero. A caller's own `capUsd` can lower that and never raise
-it. Nobody holding a key can spend the operator's money.
+### Metered sources, and the money
+
+Competitor ads come from a paid vendor, so `includeAds` is available to every
+caller and bounded by a budget rather than by a rate limit. **A rate limit
+bounds how often, never how much**: twenty reports a minute with ads on is
+twenty metered vendor runs a minute, which a rate limit permits happily.
+
+Three ceilings, each stopping something different:
+
+| | stops |
+|---|---|
+| `QUORUM_MAX_CAP_USD` | one runaway report draining the budget by itself |
+| `QUORUM_SPEND_PER_KEY_USD` | one caller draining it |
+| `QUORUM_SPEND_TOTAL_USD` | **all callers together** draining it |
+
+The third is the one that matters when ads are open to everyone. Without it the
+real ceiling is the per key figure multiplied by however many keys exist, which
+is not a ceiling.
+
+**All three default to zero, which leaves ads off.** An operator who has not
+set a budget has not agreed to a bill, so forgetting produces a report without
+ads rather than an invoice. The server says which state it is in on boot.
+
+Running out is **not an error**. The report still runs and still answers, it
+just answers without the metered leg, and the degradation list says exactly
+why. Failing a whole report over an optional extra would throw away minutes of
+free retrieval.
+
+A coalesced run is paid for by **whoever started it**, and callers who join it
+ride free. That is what coalescing is for, and splitting a bill across joiners
+who arrived at different moments would be arbitrary in a way nobody could
+check. Spend is charged from what the cost meter actually recorded, never from
+an estimate, and `GET /v1/usage` reports it.
+
+Synthesis and image reading remain off on the hosted path entirely.
 
 `POST /v1/verify` is the endpoint that makes the rest falsifiable. If a claim
 cites a record that does not exist, this says so, and it says so about our
