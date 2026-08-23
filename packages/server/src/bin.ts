@@ -321,10 +321,15 @@ const limits = {
 };
 const quotas = createQuotas(limits);
 
+/* Doubles as the key request address on the root signpost, so setting it for
+ * the SEC also answers the question a stranger has at the front door. */
+const contactEmail = process.env['QUORUM_CONTACT_EMAIL']?.trim();
+
 const server = createReceiptsServer({
   corpus, keyHashes, requireAuth: keyHashes.size > 0, queue, quotas,
   /* So GET /v1/usage can hand each key its own webhook signing secret. */
   ...(webhooksOn ? { webhookSecret } : {}),
+  ...(contactEmail ? { contactEmail } : {}),
 });
 
 server.listen(port, () => {

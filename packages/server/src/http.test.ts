@@ -23,7 +23,7 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 interface Live { base: string; ids: string[]; queue?: JobQueue; finish?: (over?: Partial<RunOutcome>) => void; close: () => Promise<void> }
 
-async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: boolean; webhookSecret?: string } = {}): Promise<Live> {
+async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: boolean; webhookSecret?: string; contactEmail?: string } = {}): Promise<Live> {
   const corpus: CorpusDriver = openSqliteCorpus({ path: join(scratch, `c-${Math.floor(performance.now() * 1e6)}.db`) });
   await corpus.addDocs([
     { source: 'reddit', kind: 'comment', externalId: 'a', channel: 'r/running', text: 'these run small and I sized up half a size', score: 7, url: 'https://e.test/a', createdUtc: 1 },
@@ -56,6 +56,7 @@ async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: 
      * that the rate limit headers never reached a successful response. */
     corpus, keyHashes, quotas: createQuotas(),
     ...(over.webhookSecret ? { webhookSecret: over.webhookSecret } : {}),
+    ...(over.contactEmail ? { contactEmail: over.contactEmail } : {}),
     ...(queue ? { queue } : {}),
     ...(over.requireAuth === undefined ? {} : { requireAuth: over.requireAuth }),
   });
@@ -615,4 +616,21 @@ test('usage says null for the secret when webhooks are off', async () => {
     const body = await (await fetch(`${s.base}/v1/usage`)).json() as { webhookSecret: string | null };
     assert.equal(body.webhookSecret, null, 'a secret that signs nothing is not worth inventing');
   } finally { await s.close(); }
+});
+
+/* The question every keyed api forgets to answer at its front door. */
+test('the root tells a stranger how to get a key', async () => {
+  const withEmail = await live({ requireAuth: true, keys: ['a-perfectly-good-key'], contactEmail: 'keys@example.test' });
+  try {
+    const body = await (await fetch(`${withEmail.base}/`)).json() as { getAKey: string };
+    assert.match(body.getAKey, /keys@example\.test/, 'the operator chosen address is named');
+    assert.match(body.getAKey, /issued by hand/, 'and the process is stated honestly');
+  } finally { await withEmail.close(); }
+
+  const without = await live({ requireAuth: true, keys: ['a-perfectly-good-key'] });
+  try {
+    const body = await (await fetch(`${without.base}/`)).json() as { getAKey: string };
+    assert.match(body.getAKey, /issued by hand/, 'still answered when no address is configured');
+    assert.equal(body.getAKey.includes('@'), false, 'no address is invented');
+  } finally { await without.close(); }
 });

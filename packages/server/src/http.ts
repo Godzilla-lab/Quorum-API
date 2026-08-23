@@ -60,6 +60,12 @@ export interface ServerOptions {
    * from it.
    */
   webhookSecret?: string;
+  /*
+   * Where a stranger asks for a key, shown on the root signpost. Operator
+   * configured rather than hardcoded, so publishing an address is a deployment
+   * decision and not a code change.
+   */
+  contactEmail?: string;
   maxBodyBytes?: number;
   /*
    * Event loop lag, in milliseconds, above which the server SHEDS LOAD.
@@ -327,6 +333,14 @@ export function createReceiptsServer(options: ServerOptions): Server {
           source: 'https://github.com/Godzilla-lab/Quorum-API',
           health: '/v1/healthz',
           authenticate: 'send your key as a Bearer token in the Authorization header, on every /v1 path',
+          /*
+           * The question every keyed api forgets to answer on its front door.
+           * Issued by hand while the api is early, and the door says so
+           * honestly instead of leaving a stranger with a 401 and no path.
+           */
+          getAKey: options.contactEmail
+            ? `keys are issued by hand while the api is early. Email ${options.contactEmail} to request one.`
+            : 'keys are issued by hand while the api is early. Ask through the source repository.',
         },
       }),
     },

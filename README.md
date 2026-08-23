@@ -12,7 +12,7 @@ rather than a README asserting it.
 [![CI](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml/badge.svg)](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-1%2C105-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1%2C106-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
 
@@ -40,6 +40,11 @@ and read the human who said it.
 The hosted API lives at **https://quorum-api-j15n.onrender.com**, keyed, on a free
 tier instance that sleeps when idle, so the first request after a quiet spell
 waits a few seconds for it to wake.
+
+**Getting a key**: issued by hand while the API is early. The
+[API root](https://quorum-api-j15n.onrender.com) names the address to write to,
+and one key carries everything with it: quotas, spend budget, tenancy, and your
+webhook signing secret, all self served from `GET /v1/usage`.
 
 ## Contents
 
@@ -129,7 +134,7 @@ non zero and says which one.
 
 | | |
 |---|---|
-| **Engine** | Working. 1,105 tests, offline and keyless |
+| **Engine** | Working. 1,106 tests, offline and keyless |
 | **CLI** | Working, every flag |
 | **MCP server** | Working, five tools over stdio |
 | **JavaScript SDK** | Working, 11 methods |
@@ -193,7 +198,7 @@ Requires **Node 22.18 or newer**, and nothing else.
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 1,105 tests, offline, no keys
+npm test          # 1,106 tests, offline, no keys
 ```
 
 Then research something. The input is a **subject**, not a URL. Plain text
@@ -693,7 +698,7 @@ npm run test:postgres  # the driver against a real server, needs QUORUM_PG_URL
 
 CI runs the test suite inside a network namespace with no route off the host, so
 an adapter that quietly reaches for the wire fails immediately instead of flaking
-later. Three of the 1,105 tests need a real PostgreSQL server and skip without
+later. Three of the 1,106 tests need a real PostgreSQL server and skip without
 `QUORUM_PG_URL`.
 
 ## License
