@@ -37,7 +37,23 @@ reach the network on your behalf.
 No key is required for anything. Reddit through a public archive, Hacker News,
 the App Store, and four government safety archives are all free and keyless.
 Keys only ever ADD sources, and a missing one degrades a run rather than
-failing it. Copy `.env.example` to `.env` to see the full list.
+failing it.
+
+### Environment
+
+All optional. Put them in a `.env` at the repo root, which is gitignored.
+
+| | |
+|---|---|
+| `QUORUM_CONTACT_EMAIL` | Not a key. The SEC requires a User-Agent naming who is calling and returns 403 without one, so `sec-edgar` reports itself unconfigured until this is set. A role address outlives whoever set it up. |
+| `OPENROUTER_API_KEY` | Subject expansion, `--synthesise` and `--read-images`. All three are off by default, and the counts never come from a model, so the deterministic report is identical without it. |
+| `APIFY_TOKEN` | The Meta ad library, and the only metered source in the repo. Every call charges the cost meter and lands on the report's bill. Absent, the ads leg is skipped exactly as `--no-ads` does. |
+| `QUORUM_CORPUS` | SQLite corpus path. Default `./quorum.db`. |
+| `QUORUM_PG_URL` | Postgres, for the hosted corpus. Paste the provider uri whole: it is parsed rather than split, so `sslmode` is honoured and a password containing `@` survives. |
+| `QUORUM_PG_CA` | Path to the provider CA. Worth setting, because `sslmode=require` means encrypt and **not** verify. |
+| `QUORUM_API_KEYS` | Comma separated bearer keys for the server. **Absent means the instance is open**, which the server says out loud on boot. |
+| `QUORUM_CONCURRENCY` | Concurrent report runs, default 2. Not a throughput dial: every concurrent run is concurrent pressure on the same volunteer archives. |
+| `PORT` | Default 8787. A host normally sets this. |
 
 ## Quickstart
 
@@ -51,16 +67,9 @@ npm run build
 npm test
 ```
 
-Keys are optional and go in a `.env` you copy from the template:
-
-```bash
-cp .env.example .env
-```
-
-`.env.example` lists every variable the code reads and what each one costs you
-by being absent. Nothing there is needed for `--offline`, and a missing key
-degrades a run rather than failing it, so it is worth starting with none of them
-and adding one when a report tells you what it could not reach.
+Nothing above needs a key, and `--offline` never touches the network at all.
+Start with none of them and add one when a report tells you what it could not
+reach.
 
 Then research something. The input is a **subject**, not a URL. Plain text
 works, a product URL works, and a product URL the store refuses still works,

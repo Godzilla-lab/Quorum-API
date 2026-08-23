@@ -1,7 +1,6 @@
 # Secrets. Never commit these.
 .env
 .env.*
-!.env.example
 
 # The corpus is data, not source. It is also the moat.
 *.db
@@ -24,3 +23,13 @@ fixtures/raw/
 node_modules/
 .DS_Store
 coverage/
+
+# Internal working documents. Kept on disk, never published: the working
+# agreement, the spec and PRD with their pricing and risk sections, the task
+# log, and the agent skills. None of it is a secret and all of it is thinking
+# rather than product, which is a different reason not to publish it.
+CLAUDE.md
+SPEC.md
+docs/PRD.md
+tasks/
+.claude/

@@ -76,8 +76,8 @@ for (const f of files) {
  * is missing or this is not a repo, nothing is filtered and every hit stands,
  * because the failure mode of guessing here is a committed credential.
  *
- * `.env.example` is committed and therefore never filtered. A real value in
- * the template is a genuine leak, and it is the easiest one to make.
+ * Only the ignore status decides. Any committed file carrying a credential
+ * shaped string still fails, which is the case this exists for.
  */
 const ignored = new Set();
 if (secretHits.length) {
