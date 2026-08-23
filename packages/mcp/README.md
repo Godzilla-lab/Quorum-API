@@ -2,9 +2,42 @@
 
 An MCP server over the Quorum SDK.
 
-Not built yet. This file is the design, recorded now so the tool surface is
-decided before anyone writes it, because the tool schema is the part that is
-expensive to change later.
+Built. Five tools over stdio, spoken as JSON-RPC 2.0 with no dependency.
+
+The design below was written before the code and the code follows it, because
+the tool schema is the part that is expensive to change later.
+
+## Connecting a client
+
+**Claude Code** reads `.mcp.json` at the repo root, which is already there.
+Start Claude Code from this directory and the tools appear.
+
+**Claude Desktop** uses `claude_desktop_config.json`
+(`~/Library/Application Support/Claude/` on macOS). Absolute paths, because it
+does not run from your repo:
+
+```json
+{
+  "mcpServers": {
+    "quorum": {
+      "command": "node",
+      "args": [
+        "--disable-warning=ExperimentalWarning",
+        "/absolute/path/to/Quorum-API/packages/mcp/src/bin.ts"
+      ],
+      "env": { "QUORUM_CORPUS": "/absolute/path/to/quorum.db" }
+    }
+  }
+}
+```
+
+Anything else that speaks MCP over stdio works the same way: run
+`packages/mcp/src/bin.ts` with `QUORUM_CORPUS` pointed at a corpus.
+
+**It runs on your machine, against your corpus, and touches no network** unless
+you set `QUORUM_MCP_RESEARCH=1`. Until you do, `research_product` is not even
+registered and the retrieval stack is never imported, so there is no adapter
+loaded that could reach out.
 
 ## Why this exists
 
@@ -34,7 +67,7 @@ Three rules follow:
 
 | Tool | Does | Notes |
 |---|---|---|
-| `research_product` | Start a report from a URL, optionally wait | Action enum rather than separate start and poll tools |
+| `research_product` | Start a report from a URL or a name | **Off unless QUORUM_MCP_RESEARCH=1** |
 | `search_evidence` | Query the corpus directly, no synthesis | Aggregated counts plus top records |
 | `get_receipt` | Resolve one or many receipt ids to real records | Batched |
 | `category_warmth` | Coverage, and whether an ask is cheap or expensive | Lets an agent decide before spending |

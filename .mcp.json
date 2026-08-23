@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "quorum": {
+      "command": "node",
+      "args": ["--disable-warning=ExperimentalWarning", "packages/mcp/src/bin.ts"],
+      "env": {
+        "QUORUM_CORPUS": "./quorum.db"
+      }
+    }
+  }
+}
