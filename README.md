@@ -62,6 +62,7 @@ All optional. Put them in a `.env` at the repo root, which is gitignored.
 | **CLI** | The whole engine on your machine, against a corpus you own | You |
 | **Hosted API** | The same engine against a **shared, already warm** corpus | Us |
 | **MCP server** | Five tools an agent can call | You, over stdio |
+| **JS SDK** | A typed client for the API | Your code |
 
 They are the same pipeline. The only thing the hosted API sells that the source
 cannot is a corpus somebody already paid to fill: cold retrieval measured 596
@@ -139,6 +140,47 @@ owned and row level security enforces it, verified against a real PostgreSQL 18.
 For anything beyond a laptop the corpus belongs in Postgres rather than SQLite,
 because SQLite's driver is synchronous and blocks the event loop on every read.
 See `docs/postgres.md`.
+
+### JavaScript SDK
+
+Typed, zero dependency, written against `spec/openapi.yaml`. Every method is
+one operationId from that file.
+
+```js
+import { createClient } from '@quorum/sdk-js';
+
+const quorum = createClient({ baseUrl: 'https://your-host', apiKey: process.env.QUORUM_KEY });
+
+const found = await quorum.searchEvidence({ query: 'sizing', category: 'running shoes' });
+if (!found.ok) throw new Error(found.error.message);
+
+for (const record of found.data.records) console.log(record.receiptId, record.text);
+```
+
+**Errors are values, never thrown**, the same rule the engine follows anywhere
+a vendor can be down. A caller gets `{ ok: false, error }` carrying the
+server's `type`, its `requestId` and any `retryAfterSeconds`, because a 429, a
+503 and a report that is simply not finished yet are all normal and none of
+them is exceptional.
+
+**It honours the server's pacing.** `waitForReport` polls to completion using
+`Retry-After` when the server sends one, and treats a 503 as the load shedder
+rather than a failure. A client that gives up on the first refusal reports a
+busy service as a broken one, which is exactly what the shedder exists to
+prevent.
+
+```js
+const started = await quorum.createReport({ subject: 'wool runner', offline: true });
+if (started.ok) {
+  const report = await quorum.waitForReport(started.data.id, {
+    onPoll: (r) => console.log(r.status),
+  });
+}
+```
+
+`streamReport` returns the same run as an async iterable of server sent events,
+parsed by hand because there is no EventSource in Node that accepts an
+Authorization header.
 
 ### MCP
 

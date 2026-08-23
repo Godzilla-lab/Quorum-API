@@ -153,6 +153,22 @@ const CREDENTIALLED_VENDORS = new Map([
   ['packages/llm/src/expand.ts', 'openrouter.ai'],
   ['packages/llm/src/claims.ts', 'openrouter.ai'],
 ]);
+
+/*
+ * A SECOND CATEGORY, AND IT IS NOT A LOOSER VERSION OF THE FIRST.
+ *
+ * The rule above exists to stop us authenticating to a source we SCRAPE, which
+ * is what the legal posture rests on. A client for OUR OWN API is the opposite
+ * situation: the credential is the user's own key, sent to the user's own
+ * service, and no scraped source is involved anywhere.
+ *
+ * These cannot be allowlisted by host, because they have no host. The address
+ * comes from the caller, which is exactly what makes them our own client and
+ * not a vendor client, so THAT is what is asserted: the file must take its
+ * base url as configuration. Hardcode a vendor host into one of these and the
+ * exemption stops applying, which is the property worth having.
+ */
+const OWN_API_CLIENTS = new Set(['packages/sdk-js/src/index.ts']);
 if (!existsSync(sourcesDir) || readdirSync(sourcesDir).filter((d) => statSync(join(sourcesDir, d)).isDirectory()).length === 0) {
   record('PENDING', 'no-auth rule', 'no adapters exist yet, lands with M2');
 } else {
@@ -168,6 +184,16 @@ if (!existsSync(sourcesDir) || readdirSync(sourcesDir).filter((d) => statSync(jo
       if (!/['"]?(Authorization|Cookie|set-cookie)['"]?\s*:/i.test(text)) continue;
 
       const rel = relative(ROOT, f).split(sep).join('/');
+
+      if (OWN_API_CLIENTS.has(rel)) {
+        if (!/baseUrl/.test(text)) {
+          violations.push(`${rel} is exempt as a client of our own API but does not take a baseUrl`);
+        } else {
+          exempted++;
+        }
+        continue;
+      }
+
       const allowedHost = CREDENTIALLED_VENDORS.get(rel);
       if (!allowedHost) {
         violations.push(`${rel} sends a credential header and is not an allowlisted vendor client`);
@@ -182,7 +208,7 @@ if (!existsSync(sourcesDir) || readdirSync(sourcesDir).filter((d) => statSync(jo
   else {
     record('PASS', 'no-auth rule',
       `${adapterDirs.length} adapter(s) and ${scanRoots.length} package(s) scanned, `
-      + `${exempted} allowlisted vendor client(s), no scraped source authenticates`);
+      + `${exempted} allowlisted client(s), no scraped source authenticates`);
   }
 }
 
