@@ -647,6 +647,25 @@ export function createReceiptsServer(options: ServerOptions): Server {
   const server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const requestId = randomUUID();
 
+    /*
+     * Filled in by the quota check once the key is known, and MERGED INTO
+     * EVERY RESPONSE BY send ITSELF, which is the part that was missing.
+     *
+     * These headers were built on every request and then passed to send in
+     * exactly one place: the 429. So the documented promise, that a caller can
+     * read its remaining allowance and pace itself BEFORE being refused, was
+     * impossible: the first time anyone saw a rate limit header was the
+     * refusal. The spec, the README and the bench docs all said otherwise, and
+     * nothing could notice because a header nobody sends looks identical to
+     * one nobody reads. Found 2026-08-23 by curling the live instance and
+     * counting the headers that came back.
+     *
+     * Empty until the quota block runs, so a shed 503 and an unauthenticated
+     * 401 carry none, correctly: there is no key yet to report an allowance
+     * for.
+     */
+    let quotaHeaders: Record<string, string> = {};
+
     const send = (status: number, body: unknown, headers: Record<string, string> = {}): void => {
       const payload = JSON.stringify(body, null, 2);
       res.writeHead(status, {
@@ -654,6 +673,7 @@ export function createReceiptsServer(options: ServerOptions): Server {
         /* On every response, not only on errors. Support is impossible without
          * something a caller can quote back. */
         'x-request-id': requestId,
+        ...quotaHeaders,
         ...headers,
       });
       res.end(payload);
@@ -709,7 +729,6 @@ export function createReceiptsServer(options: ServerOptions): Server {
          * refusal is the point: a 429 that first did the work it was refusing
          * protects nothing.
          */
-        let quotaHeaders: Record<string, string> = {};
         if (quotas) {
           const meter = meterFor(req.method ?? 'GET', url.pathname);
           const decision = quotas.check(keyLabel, meter);

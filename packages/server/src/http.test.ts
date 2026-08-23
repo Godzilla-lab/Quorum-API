@@ -14,6 +14,7 @@ import { after, test } from 'node:test';
 import type { AddressInfo } from 'node:net';
 import { openSqliteCorpus, type CorpusDriver } from '@quorum/corpus';
 import { createReceiptsServer, hashKey } from './http.ts';
+import { createQuotas } from './quotas.ts';
 import { createJobQueue, type JobQueue, type RunContext, type RunOutcome } from './jobs.ts';
 
 const scratch = mkdtempSync(join(tmpdir(), 'receipts-server-'));
@@ -49,7 +50,10 @@ async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: 
     : undefined;
 
   const server = createReceiptsServer({
-    corpus, keyHashes,
+    /* A real quotas instance, as bin.ts wires one. Without it the whole quota
+     * block is skipped, which is exactly why no test here could ever notice
+     * that the rate limit headers never reached a successful response. */
+    corpus, keyHashes, quotas: createQuotas(),
     ...(queue ? { queue } : {}),
     ...(over.requireAuth === undefined ? {} : { requireAuth: over.requireAuth }),
   });
@@ -506,5 +510,38 @@ test('a webhookUrl that is not a string is still refused', async () => {
   try {
     const res = await start(s.base, { subject: 'wool runner', webhookUrl: 42 });
     assert.equal(res.status, 400);
+  } finally { await s.close(); }
+});
+
+/*
+ * THE HEADERS THAT EXISTED AND NEVER ARRIVED. quotaHeaders was built on every
+ * request and passed to send in exactly one place, the 429, so the documented
+ * promise that a caller can pace itself BEFORE being refused was impossible:
+ * the first rate limit header anyone ever saw was the refusal itself. The
+ * spec, the README and the bench docs all claimed otherwise. Found 2026-08-23
+ * by curling the live instance and counting what came back.
+ */
+test('a successful answer carries the rate limit headers, not only a refusal', async () => {
+  const s = await live();
+  try {
+    const res = await fetch(`${s.base}/v1/evidence/${s.ids[0]}`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('x-ratelimit-limit') ?? '', /^\d+$/, 'the allowance is stated');
+    assert.match(res.headers.get('x-ratelimit-remaining') ?? '', /^\d+$/, 'and what is left of it');
+    assert.match(res.headers.get('x-ratelimit-reset') ?? '', /^\d+$/, 'and when it resets');
+
+    /* And remaining actually counts down, or the header is decoration. */
+    const first = Number(res.headers.get('x-ratelimit-remaining'));
+    const again = await fetch(`${s.base}/v1/evidence/${s.ids[0]}`);
+    assert.equal(Number(again.headers.get('x-ratelimit-remaining')), first - 1);
+  } finally { await s.close(); }
+});
+
+test('healthz is exempt and carries no rate limit headers', async () => {
+  const s = await live();
+  try {
+    const res = await fetch(`${s.base}/v1/healthz`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('x-ratelimit-limit'), null);
   } finally { await s.close(); }
 });
