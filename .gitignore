@@ -33,3 +33,6 @@ SPEC.md
 docs/PRD.md
 tasks/
 .claude/
+
+# npm publish staging, built by scripts/publish-npm.mjs
+.npm-staging/

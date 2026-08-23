@@ -15,6 +15,8 @@
  * the process instead would leave the same records written and no summary.
  */
 
+/* First, before anything that touches node:sqlite. See the module header. */
+import './quiet-experimental.ts';
 import { realpathSync } from 'node:fs';
 import process from 'node:process';
 import { findProductByName, makeAdSource, makeSource, resolveSubject } from '@quorum/sources';

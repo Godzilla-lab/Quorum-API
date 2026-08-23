@@ -20,7 +20,7 @@
 import { AD_SOURCE_IDS, SOURCE_IDS } from '@quorum/sources';
 import { OUTPUT_FORMATS, isOutputFormat, type OutputFormat } from './formats.ts';
 
-export const VERSION = '0.0.0';
+export const VERSION = '0.1.0';
 
 /* From the registry beside the adapters, never a second list here. A CLI that
  * kept its own copy would reject a source the server accepts. */
