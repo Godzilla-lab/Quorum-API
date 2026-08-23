@@ -207,7 +207,16 @@ if (process.argv.includes('--publish')) {
   const who = run('npm', ['whoami'], ROOT).trim();
   process.stdout.write(`\npublishing as ${who}\n`);
   for (const pkg of PACKAGES) {
-    run('npm', ['publish', '--access', 'public'], staged.get(pkg.name).stage);
+    /*
+     * INHERITED STDIO, BECAUSE PUBLISHING IS INTERACTIVE NOW. npm requires
+     * two factor auth to publish, so each publish may ask for a one time
+     * password or open a browser confirmation. A piped stdio swallows that
+     * prompt and the publish dies as an opaque 403, which is exactly how the
+     * first real attempt failed.
+     */
+    execFileSync('npm', ['publish', '--access', 'public'], {
+      cwd: staged.get(pkg.name).stage, stdio: 'inherit',
+    });
     process.stdout.write(`  published ${pkg.name}@${VERSION}\n`);
   }
 } else {
