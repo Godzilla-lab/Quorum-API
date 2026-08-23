@@ -84,12 +84,22 @@ const spendTotalUsd = Number(process.env['QUORUM_SPEND_TOTAL_USD'] ?? 0);
  * this repo runs against it with no service to start.
  */
 const pgUrl = process.env['QUORUM_PG_URL'] ?? process.env['DATABASE_URL'];
+/*
+ * THE CA, AS A PATH OR AS THE PEM ITSELF.
+ *
+ * A path is what you want on a machine you control. A hosting platform hands
+ * you environment variables and not files, so `QUORUM_PG_CA` alone meant the
+ * certificate could not be verified anywhere it matters most: on the public
+ * internet, which is exactly where the database is reachable from.
+ */
+const pgCaPem = process.env['QUORUM_PG_CA_PEM'];
 const pgCaPath = process.env['QUORUM_PG_CA'];
+const caCert = pgCaPem?.trim()
+  ? pgCaPem
+  : pgCaPath ? readFileSync(pgCaPath, 'utf8') : undefined;
+
 const postgres = pgUrl
-  ? openPostgres({
-    url: pgUrl,
-    ...(pgCaPath ? { caCert: readFileSync(pgCaPath, 'utf8') } : {}),
-  })
+  ? openPostgres({ url: pgUrl, ...(caCert ? { caCert } : {}) })
   : null;
 
 const corpus = postgres ? postgres.driver : openSqliteCorpus({ path: corpusPath });

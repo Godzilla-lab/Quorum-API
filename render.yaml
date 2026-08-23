@@ -1,0 +1,76 @@
+# Render blueprint.
+#
+# Render reads this and provisions the service, so the settings that matter are
+# reviewed here in the repo rather than retyped into a form. Create it with
+# New > Blueprint and point it at this repository.
+#
+# NO SECRET IS IN THIS FILE AND NONE EVER MAY BE. Every value that is one is
+# marked `sync: false`, which tells Render to prompt for it once and keep it in
+# its own encrypted store. This file is public.
+
+services:
+  - type: web
+    name: quorum-api
+    runtime: node
+    plan: free
+
+    # MUST MATCH THE DATABASE. Aiven is in Amsterdam and Frankfurt is the
+    # closest Render region, about 10ms away. Oregon would put the Atlantic
+    # between the app and its corpus, and a report makes dozens of round trips,
+    # so that choice costs a second per report before anything is computed.
+    # Neither Render nor Aiven can move a service after it is created.
+    region: frankfurt
+
+    # `--include=dev` because Render sets NODE_ENV=production, npm then skips
+    # devDependencies, and `npm run build` is `tsc -b`, which needs the
+    # compiler. Without it the build fails on a missing typescript.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+
+    # Cheap, unauthenticated, and touches no database, so a health check cannot
+    # itself be the thing that fails. It is also exempt from rate limiting: an
+    # instance must be able to say it is alive while it is busy, or a load
+    # balancer removes it for being busy.
+    healthCheckPath: /v1/healthz
+
+    envVars:
+      # The Aiven uri, whole, including ?sslmode=require. It is parsed rather
+      # than split, so a password containing @ or / survives.
+      - key: QUORUM_PG_URL
+        sync: false
+
+      # The Aiven CA, pasted as a PEM. WITHOUT IT THE CERTIFICATE IS NOT
+      # VERIFIED: sslmode=require means encrypt and not verify, and a managed
+      # provider signs with its own CA so the public root store rejects it.
+      # The server says which of the two it got on boot.
+      - key: QUORUM_PG_CA_PEM
+        sync: false
+
+      # Comma separated bearer keys. WITHOUT THIS THE INSTANCE IS OPEN and says
+      # so on boot, which is fine on a laptop and not on a public hostname.
+      - key: QUORUM_API_KEYS
+        sync: false
+
+      # Metered sources. All three must be above zero or ads stay off, which is
+      # the safe default: an operator who has not set a budget has not agreed
+      # to a bill. Start small, the Apify plan is free with limited credits.
+      - key: QUORUM_SPEND_PER_KEY_USD
+        value: "0.50"
+      - key: QUORUM_SPEND_TOTAL_USD
+        value: "2"
+      - key: QUORUM_MAX_CAP_USD
+        value: "0.25"
+
+      # Optional source keys. Absent, each source reports itself unconfigured
+      # and the run degrades rather than failing.
+      - key: QUORUM_CONTACT_EMAIL
+        sync: false
+      - key: APIFY_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+
+      # Two, and it is upstream politeness rather than a throughput dial. Every
+      # concurrent run is concurrent pressure on the same volunteer archives.
+      - key: QUORUM_CONCURRENCY
+        value: "2"
