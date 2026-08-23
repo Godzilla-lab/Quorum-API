@@ -69,7 +69,7 @@ info:
     url: https://www.apache.org/licenses/LICENSE-2.0
   contact:
     name: Quorum
-    url: https://github.com/quorum
+    url: https://github.com/Godzilla-lab/Quorum-API
 
 servers:
   - url: https://api.receipts.dev/v1
@@ -142,9 +142,9 @@ paths:
             Location:
               schema: { type: string, format: uri }
               description: Where to poll for this report.
-            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
-            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
-            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+            X-RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            X-RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            X-RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReportAccepted' }
@@ -538,6 +538,22 @@ components:
     RetryAfter:
       schema: { type: integer, minimum: 1 }
       description: Seconds to wait before retrying. Always present on 429 and 503.
+    WebhookId:
+      schema: { type: string, pattern: '^rep_[0-9a-f]{16}$' }
+      description: |
+        Sent on a webhook delivery. The report id, stable across every retry of
+        the same message, so a receiver deduplicates on it.
+    WebhookTimestamp:
+      schema: { type: integer }
+      description: |
+        Sent on a webhook delivery. Unix seconds at the moment of this attempt,
+        not of the first. Check it against a tolerance to refuse replays.
+    WebhookSignature:
+      schema: { type: string }
+      description: |
+        Sent on a webhook delivery. A space delimited list of `v1,{base64}`
+        signatures over `{webhook-id}.{webhook-timestamp}.{body}`. Any one
+        matching is enough, which is what makes secret rotation possible.
 
   responses:
     BadRequest:
@@ -581,9 +597,9 @@ components:
       description: Too many requests for this quota.
       headers:
         Retry-After: { $ref: '#/components/headers/RetryAfter' }
-        RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
-        RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
-        RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+        X-RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+        X-RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+        X-RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -1235,11 +1251,102 @@ components:
           type: string
           format: uri
           description: |
-            Called once on completion. Validated against the same rules as every
-            other URL this service touches: scheme allowlist, DNS resolved and
-            checked against private and reserved space before connecting, the
-            resolved address pinned for the connection, and every redirect hop
-            revalidated. A webhook into private address space is refused.
+            POSTed once when the report reaches a terminal state, complete or
+            failed. A report you cancelled is not announced, because you already
+            know.
+
+            Must be `https`, and must not carry credentials in the URL.
+
+            Validated against the same rules as every other URL this service
+            touches: scheme allowlist, DNS resolved and checked against private
+            and reserved space before connecting, the resolved address pinned
+            for the connection, and every redirect hop revalidated. A webhook
+            into private address space is refused.
+
+            Where that check happens is worth knowing, because it decides what
+            you get back. A literal address is settled at submit, so
+            `https://169.254.169.254/` is a 400 you see immediately. A hostname
+            is settled at delivery instead, against the address that is then
+            pinned, because a name can resolve to something different between
+            your request and our connection. So a hostname that resolves into
+            private space is accepted here and refused at delivery, without
+            retries.
+
+            The body is byte identical to `GET /v1/reports/{id}` for the same
+            report, and it is signed. See `WebhookDelivery` for the headers and
+            the schedule.
+
+    WebhookDelivery:
+      type: object
+      description: |
+        ## What arrives, and how to check it
+
+        A completed report is POSTed to `webhookUrl` with a body byte identical
+        to `GET /v1/reports/{id}`, and three headers, following the
+        [Standard Webhooks](https://www.standardwebhooks.com/) specification so
+        that you can verify with an off the shelf library rather than with code
+        we invented.
+
+        | header | value |
+        |---|---|
+        | `webhook-id` | The report id. Stable across retries, so deduplicate on it. |
+        | `webhook-timestamp` | Unix seconds at the moment of THIS attempt. |
+        | `webhook-signature` | `v1,{base64 hmac-sha256}`, space delimited list. |
+
+        The signed content is `{webhook-id}.{webhook-timestamp}.{body}`, and the
+        key is the base64 body of your signing secret, not the `whsec_` label.
+
+        ## Verify the timestamp, not only the signature
+
+        A signature alone is replayable forever. Reject a delivery whose
+        `webhook-timestamp` is outside a tolerance you choose; five minutes is
+        the usual default. Every retry is signed afresh with its own timestamp,
+        so a delivery three days into the schedule still verifies inside that
+        window.
+
+        The signature header is a space delimited list precisely so a secret can
+        be rotated: during a rotation window both signatures are sent, and any
+        one of them matching is enough.
+
+        ## Retries
+
+        Delivery is at least once. A 2xx is success. A 5xx, a 429, a timeout or
+        a network failure is retried on the schedule below; every other 4xx is
+        not, because a receiver rejecting the body will reject it again. A URL
+        refused by the address rules is never retried at all.
+
+        | attempt | after |
+        |---|---|
+        | 1 | immediately |
+        | 2 | 5 seconds |
+        | 3 | 5 minutes |
+        | 4 | 30 minutes |
+        | 5 | 2 hours |
+        | 6 | 5 hours |
+        | 7 | 10 hours |
+        | 8 | 14 hours |
+        | 9 | 20 hours |
+        | 10 | 24 hours |
+
+        Ten attempts spanning about 75 hours, with jitter. Deliveries survive a
+        restart, so a receiver that was down for a day still gets its report.
+
+        ## Two things this does not do, stated rather than discovered
+
+        After the tenth attempt the delivery is abandoned and logged. The
+        Standard Webhooks specification also recommends telling you by another
+        channel and disabling the endpoint; there is no endpoint registry and no
+        mail path here, so neither happens. Poll `GET /v1/reports/{id}` if a
+        webhook never arrives.
+
+        On an instance running without API keys, every caller shares the single
+        key label `self-hosted` and therefore the same signing secret. A
+        signature proves the delivery came from that instance, not which caller
+        asked for it. On a keyed instance each key has its own secret.
+      properties:
+        body:
+          description: Identical to the ReportSnapshot served by GET /v1/reports/{id}.
+          $ref: '#/components/schemas/Report'
 
     ReportAccepted:
       type: object

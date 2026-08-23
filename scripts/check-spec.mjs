@@ -142,6 +142,7 @@ function checkEnum(name, prop, actual, why) {
 const { SOURCE_TIER, TIER_LABEL } = await import('@quorum/corpus/tiers');
 const { MIN_RECEIPTS, WARM_MIN_DOCS, WARM_MAX_AGE_DAYS } = await import('@quorum/corpus/constants');
 const { receiptId, openSqliteCorpus } = await import('@quorum/corpus');
+const { RATE_LIMIT_HEADERS } = await import('@quorum/server');
 const {
   corroborate, assessSufficiency, fabricationReport, resolveCitations,
   createCostMeter, formatVerdict,
@@ -323,6 +324,35 @@ checkEnum('EvidenceTier', null, new Set(Object.keys(TIER_LABEL)));
   if (!warm.includes(String(WARM_MAX_AGE_DAYS))) wrong.push(`WARM_MAX_AGE_DAYS is ${WARM_MAX_AGE_DAYS}`);
   if (wrong.length) fail('CategoryStats.warm', `the description does not quote the real thresholds: ${wrong.join(', ')}`);
   else ok('CategoryStats.warm', `quotes the real thresholds, ${WARM_MIN_DOCS} records and ${WARM_MAX_AGE_DAYS} days`);
+}
+
+/* --- header names quoted in the spec must be the ones emitted ------ */
+{
+  /*
+   * WHY THIS CHECK EXISTS. The spec declared `RateLimit-Limit`, the server
+   * emitted `x-ratelimit-limit`, and the README documented `X-RateLimit-Limit`.
+   * Three documents, two behaviours, and nothing that could notice. A caller
+   * reading the contract got no rate limit headers at all and no error either,
+   * because a header nobody sends is indistinguishable from one nobody looked
+   * for. Found 2026-08-23.
+   *
+   * Compared against the exported constant rather than against a literal, so
+   * the server stays the single source of truth and this file cannot drift
+   * away from it either.
+   */
+  const declared = [...SPEC.matchAll(/^ +([A-Za-z-]*[Rr]ate-?[Ll]imit[A-Za-z-]*): \{ \$ref:/gm)]
+    .map((m) => m[1].toLowerCase());
+  const emitted = Object.values(RATE_LIMIT_HEADERS);
+  const missing = emitted.filter((h) => !declared.includes(h));
+  const stale = [...new Set(declared)].filter((h) => !emitted.includes(h));
+
+  if (!declared.length) fail('rate limit headers', 'the spec declares none at all');
+  else if (missing.length || stale.length) {
+    fail('rate limit headers', [
+      missing.length ? `the server emits ${missing.join(', ')} and the spec never declares them` : '',
+      stale.length ? `the spec declares ${stale.join(', ')} which the server never sends` : '',
+    ].filter(Boolean).join('; '));
+  } else ok('rate limit headers', `${emitted.length} names, and the spec quotes the ones the server emits`);
 }
 
 /* --- internal consistency ----------------------------------------- */

@@ -30,7 +30,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
-const UA = 'quorum/0.1 (+https://github.com/quorum)';
+const UA = 'quorum/0.1 (+https://github.com/Godzilla-lab/Quorum-API)';
 const FIXTURES_ONLY = process.argv.includes('--fixtures');
 
 const results = [];

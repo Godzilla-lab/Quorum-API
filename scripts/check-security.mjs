@@ -47,8 +47,33 @@ const SECRET_PATTERNS = [
   [/\bghp_[A-Za-z0-9]{30,}/, 'github token'],
   [/\bAKIA[0-9A-Z]{16}\b/, 'aws access key id'],
   [/\bapify_api_[A-Za-z0-9]{20,}/, 'apify token'],
-  [/(?:api[_-]?key|secret|password|token)\s*[:=]\s*['"][A-Za-z0-9_\-]{24,}['"]/i, 'credential shaped assignment'],
+  [/(?:api[_-]?key|secret|password|token)\s*[:=]\s*['"]([A-Za-z0-9_\-]{24,})['"]/i, 'credential shaped assignment'],
 ];
+
+/*
+ * A PUBLISHED TEST VECTOR IS NOT A CREDENTIAL.
+ *
+ * The rule this check enforces is "never commit a secret". A value printed in
+ * a public specification so that implementers can prove their signer is
+ * correct is the opposite of a secret: it is only useful because everybody has
+ * it, and it opens nothing.
+ *
+ * ALLOWLISTED BY EXACT VALUE, NEVER BY FILE, which is the part that matters. A
+ * file exemption would mean any real key later pasted into that test sails
+ * through. Pinned to the literal, a second credential shaped string in the same
+ * file still fails, which is the case this rule exists for.
+ *
+ * The alternative was renaming the constant until the pattern stopped matching,
+ * which is how a security check quietly becomes decoration.
+ */
+const PUBLISHED_VECTORS = new Set([
+  /*
+   * The Standard Webhooks signing vector, from the Svix documentation, used by
+   * packages/server/src/webhooks.test.ts to check our signature against
+   * somebody else's arithmetic rather than our own.
+   */
+  'whsec_plJ3nmyCDGBKInavdOK15jsl',
+]);
 
 const secretHits = [];
 for (const f of files) {
@@ -57,8 +82,13 @@ for (const f of files) {
   let text;
   try { text = readFileSync(join(ROOT, f), 'utf8'); } catch { continue; }
   for (const [re, label] of SECRET_PATTERNS) {
-    const m = text.match(re);
-    if (m) secretHits.push(`${f}: ${label}`);
+    /*
+     * Every occurrence, not the first, so one allowlisted vector cannot mask a
+     * real credential sitting on the next line.
+     */
+    const all = [...text.matchAll(new RegExp(re, re.flags.includes('g') ? re.flags : `${re.flags}g`))];
+    const real = all.filter((m) => !PUBLISHED_VECTORS.has(m[1] ?? m[0]));
+    if (real.length) secretHits.push(`${f}: ${label}`);
   }
 }
 /*
