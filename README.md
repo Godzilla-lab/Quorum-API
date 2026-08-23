@@ -28,11 +28,13 @@ and read the human who said it.
 
 ## Requirements
 
-**Node 22.18 or newer**, and nothing else. The engine has **zero runtime
-dependencies**: no framework, no ORM, no HTTP client, no test runner. That is a
-deliberate constraint rather than a boast, because every dependency in a tool
-that fetches untrusted text from the public internet is another thing that can
-reach the network on your behalf.
+**Node 22.18 or newer**. The engine has **one runtime dependency**, `pg`, and
+only in the hosted server: no framework, no ORM, no HTTP client, no test
+runner, and nothing at all in the CLI or the corpus. That is a deliberate
+constraint rather than a boast, because every dependency in a tool that fetches
+untrusted text from the public internet is another thing that can reach the
+network on your behalf. `pg` earned its place by being a connection pool that
+survives a database restart, which is not a thing worth hand writing.
 
 No key is required for anything. Reddit through a public archive, Hacker News,
 the App Store, and four government safety archives are all free and keyless.
@@ -142,9 +144,33 @@ because a category one caller warmed answers instantly for the next, which is
 the whole point of keeping one. Reports are the exception: they are tenant
 owned and row level security enforces it, verified against a real PostgreSQL 18.
 
-For anything beyond a laptop the corpus belongs in Postgres rather than SQLite,
-because SQLite's driver is synchronous and blocks the event loop on every read.
-See `docs/postgres.md`.
+### Postgres
+
+Set `QUORUM_PG_URL` and the server uses Postgres instead of SQLite. Nothing
+else changes.
+
+```bash
+QUORUM_PG_URL='postgres://user:pass@host:5432/db?sslmode=require' \
+QUORUM_PG_CA=./provider-ca.pem \
+QUORUM_API_KEYS=$(openssl rand -hex 32) npm start
+```
+
+**Do this for anything beyond a laptop.** `node:sqlite` is synchronous, so
+every corpus read blocks the event loop: measured, evidence search topped out
+at 124 requests a second while an indexed read managed 7,477, and identical
+reports never coalesce because a second request cannot be received while the
+first is running. On a host with no persistent disk it is not an option at all,
+since the file disappears on every restart and takes the corpus with it.
+
+**Set `QUORUM_PG_CA`.** `sslmode=require` means encrypt and **not** verify, and
+a managed provider signs with its own CA so the public root store rejects it.
+Download the provider's CA and the connection is verified rather than merely
+encrypted. The server says which of the two you got on boot.
+
+`pg` is the only runtime dependency in this repo, and it lives in
+`packages/server` alone. The corpus package still has none, which is why its
+driver takes an injected client: somebody using the CLI with SQLite never
+installs a Postgres driver. See `docs/postgres.md`.
 
 ### JavaScript SDK
 

@@ -18,6 +18,10 @@
     "@quorum/cli": "*",
     "@quorum/core": "*",
     "@quorum/corpus": "*",
-    "@quorum/sources": "*"
+    "@quorum/sources": "*",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }

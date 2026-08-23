@@ -29,7 +29,9 @@ import { isWarm } from '@quorum/corpus/constants';
 import { runResearch, type RunResult } from '@quorum/cli';
 import { SOURCE_IDS, findProductByName, makeAdSource, makeSource, resolveSubject } from '@quorum/sources';
 import { createReceiptsServer, hashKey } from './http.ts';
+import { readFileSync } from 'node:fs';
 import { createQuotas, DEFAULT_LIMITS } from './quotas.ts';
+import { openPostgres } from './postgres.ts';
 import { createJobQueue, type ReportRequest, type RunOutcome } from './jobs.ts';
 import type { RetrievalResult } from '@quorum/core';
 import { computeClaims } from './claims.ts';
@@ -65,7 +67,32 @@ const maxCapUsd = Number(process.env['QUORUM_MAX_CAP_USD'] ?? 0);
 const spendPerKeyUsd = Number(process.env['QUORUM_SPEND_PER_KEY_USD'] ?? 0);
 const spendTotalUsd = Number(process.env['QUORUM_SPEND_TOTAL_USD'] ?? 0);
 
-const corpus = openSqliteCorpus({ path: corpusPath });
+/*
+ * POSTGRES WHEN A URL IS SET, SQLITE OTHERWISE.
+ *
+ * Not a preference. Measured 2026-08-22: `node:sqlite` is synchronous, so
+ * every corpus read blocks the event loop, and evidence search topped out at
+ * 124 requests a second while an indexed read managed 7,477. The same property
+ * is why identical reports never coalesce under load, because a second request
+ * cannot even be RECEIVED while the first report is running.
+ *
+ * It is also why a hosted deployment cannot be SQLite at all on a platform
+ * with no persistent disk: the file would vanish on every restart and take the
+ * corpus with it, and the corpus is the asset.
+ *
+ * SQLite stays the default because it is right for a laptop, and every test in
+ * this repo runs against it with no service to start.
+ */
+const pgUrl = process.env['QUORUM_PG_URL'] ?? process.env['DATABASE_URL'];
+const pgCaPath = process.env['QUORUM_PG_CA'];
+const postgres = pgUrl
+  ? openPostgres({
+    url: pgUrl,
+    ...(pgCaPath ? { caCert: readFileSync(pgCaPath, 'utf8') } : {}),
+  })
+  : null;
+
+const corpus = postgres ? postgres.driver : openSqliteCorpus({ path: corpusPath });
 
 /* Measured 2026-08-22: a warm category answers in about 0.1s and a cold run
  * took 39.9s to 75.7s end to end. Rounded rather than averaged, because an
@@ -239,7 +266,9 @@ const quotas = createQuotas(limits);
 const server = createReceiptsServer({ corpus, keyHashes, requireAuth: keyHashes.size > 0, queue, quotas });
 
 server.listen(port, () => {
-  process.stderr.write(`quorum api on http://localhost:${port}, corpus ${corpusPath}\n`);
+  process.stderr.write(
+    `quorum api on http://localhost:${port}, corpus ${postgres ? postgres.describe() : `sqlite ${corpusPath}`}\n`,
+  );
   if (!keyHashes.size) {
     process.stderr.write('no QUORUM_API_KEYS set, so this instance is OPEN. Fine on a laptop, not on a network.\n');
   }
@@ -268,7 +297,16 @@ const shutdown = (): void => {
    * away. Records already retrieved stay in the corpus: a run that dies at
    * minute forty still leaves the archive better than it found it. */
   queue.shutdown();
-  server.close(() => { void corpus.close().then(() => process.exit(0)); });
+  /*
+   * The pool is drained AFTER the server stops accepting, so a request already
+   * in flight still has a connection to finish on. Closing it first would fail
+   * the very requests a graceful shutdown exists to protect.
+   */
+  server.close(() => {
+    void corpus.close()
+      .then(() => (postgres ? postgres.end() : undefined))
+      .then(() => process.exit(0));
+  });
 };
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
