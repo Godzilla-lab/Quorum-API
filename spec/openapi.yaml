@@ -1699,6 +1699,16 @@ components:
           properties:
             used: { type: number }
             cap: { type: [number, 'null'] }
+        webhookSecret:
+          type: [string, 'null']
+          description: |
+            This key's webhook signing secret, `whsec_` prefixed, or null when
+            the instance runs without webhooks. Scoped to the calling key, so
+            each caller sees exactly their own and nobody else's. It is stable:
+            derived from the key's identity rather than stored, so it never
+            rotates behind your back, and it rotates exactly when the operator
+            rotates the instance secret. Verify deliveries with it as described
+            on WebhookDelivery. Treat it like the API key it derives from.
 
     Quota:
       type: object

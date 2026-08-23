@@ -321,7 +321,11 @@ const limits = {
 };
 const quotas = createQuotas(limits);
 
-const server = createReceiptsServer({ corpus, keyHashes, requireAuth: keyHashes.size > 0, queue, quotas });
+const server = createReceiptsServer({
+  corpus, keyHashes, requireAuth: keyHashes.size > 0, queue, quotas,
+  /* So GET /v1/usage can hand each key its own webhook signing secret. */
+  ...(webhooksOn ? { webhookSecret } : {}),
+});
 
 server.listen(port, () => {
   process.stderr.write(

@@ -15,6 +15,7 @@ import type { AddressInfo } from 'node:net';
 import { openSqliteCorpus, type CorpusDriver } from '@quorum/corpus';
 import { createReceiptsServer, hashKey } from './http.ts';
 import { createQuotas } from './quotas.ts';
+import { deriveSecret } from './webhooks.ts';
 import { createJobQueue, type JobQueue, type RunContext, type RunOutcome } from './jobs.ts';
 
 const scratch = mkdtempSync(join(tmpdir(), 'receipts-server-'));
@@ -22,7 +23,7 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 interface Live { base: string; ids: string[]; queue?: JobQueue; finish?: (over?: Partial<RunOutcome>) => void; close: () => Promise<void> }
 
-async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: boolean } = {}): Promise<Live> {
+async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: boolean; webhookSecret?: string } = {}): Promise<Live> {
   const corpus: CorpusDriver = openSqliteCorpus({ path: join(scratch, `c-${Math.floor(performance.now() * 1e6)}.db`) });
   await corpus.addDocs([
     { source: 'reddit', kind: 'comment', externalId: 'a', channel: 'r/running', text: 'these run small and I sized up half a size', score: 7, url: 'https://e.test/a', createdUtc: 1 },
@@ -54,6 +55,7 @@ async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: 
      * block is skipped, which is exactly why no test here could ever notice
      * that the rate limit headers never reached a successful response. */
     corpus, keyHashes, quotas: createQuotas(),
+    ...(over.webhookSecret ? { webhookSecret: over.webhookSecret } : {}),
     ...(queue ? { queue } : {}),
     ...(over.requireAuth === undefined ? {} : { requireAuth: over.requireAuth }),
   });
@@ -543,5 +545,74 @@ test('healthz is exempt and carries no rate limit headers', async () => {
     const res = await fetch(`${s.base}/v1/healthz`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('x-ratelimit-limit'), null);
+  } finally { await s.close(); }
+});
+
+/* ------------------------------------------------------------------ */
+/* onboarding: the root signpost and the self served webhook secret    */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The first thing anyone does with an api host is open it in a browser, and a
+ * bare 401 teaches them nothing. The root is a keyless signpost that reads
+ * nothing and says where everything is.
+ */
+test('the root answers without a key, even on a keyed instance', async () => {
+  const s = await live({ requireAuth: true, keys: ['a-perfectly-good-key'] });
+  try {
+    const res = await fetch(`${s.base}/`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { name: string; authenticate: string; health: string };
+    assert.equal(body.name, 'quorum');
+    assert.match(body.authenticate, /Bearer/);
+    assert.equal(body.health, '/v1/healthz');
+    /* A signpost is not a surface: it reads nothing, so it counts against
+     * nothing. */
+    assert.equal(res.headers.get('x-ratelimit-limit'), null);
+  } finally { await s.close(); }
+});
+
+test('everything under /v1 still requires the key the root does not', async () => {
+  const s = await live({ requireAuth: true, keys: ['a-perfectly-good-key'] });
+  try {
+    assert.equal((await fetch(`${s.base}/v1/usage`)).status, 401);
+  } finally { await s.close(); }
+});
+
+/*
+ * SELF SERVED, SCOPED TO THE CALLER. Before this field existed the signing
+ * secret was derivable only by the operator, by hand, out of band, so every
+ * onboarding included a step nobody had written down. Usage is already the
+ * endpoint that answers "what is mine", which makes it the one right place.
+ */
+test('usage hands each key its own webhook signing secret and nobody elses', async () => {
+  const s = await live({
+    requireAuth: true,
+    keys: ['first-customer-key-value', 'second-customer-key-value'],
+    webhookSecret: 'an instance secret for this test',
+  });
+  try {
+    const mine = await (await fetch(`${s.base}/v1/usage`, {
+      headers: { authorization: 'Bearer first-customer-key-value' },
+    })).json() as { webhookSecret: string };
+    const theirs = await (await fetch(`${s.base}/v1/usage`, {
+      headers: { authorization: 'Bearer second-customer-key-value' },
+    })).json() as { webhookSecret: string };
+
+    assert.match(mine.webhookSecret, /^whsec_/);
+    assert.notEqual(mine.webhookSecret, theirs.webhookSecret, 'two keys, two secrets');
+    /* The same derivation the delivery worker signs with, so what usage hands
+     * out verifies what the worker sends. */
+    assert.equal(mine.webhookSecret, deriveSecret('an instance secret for this test', 'key-0'));
+    /* And the instance secret itself is not in the response. */
+    assert.equal(JSON.stringify(mine).includes('an instance secret'), false);
+  } finally { await s.close(); }
+});
+
+test('usage says null for the secret when webhooks are off', async () => {
+  const s = await live();
+  try {
+    const body = await (await fetch(`${s.base}/v1/usage`)).json() as { webhookSecret: string | null };
+    assert.equal(body.webhookSecret, null, 'a secret that signs nothing is not worth inventing');
   } finally { await s.close(); }
 });

@@ -12,7 +12,7 @@ rather than a README asserting it.
 [![CI](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml/badge.svg)](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
-[![Tests](https://img.shields.io/badge/tests-1%2C101-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1%2C105-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
 
@@ -129,7 +129,7 @@ non zero and says which one.
 
 | | |
 |---|---|
-| **Engine** | Working. 1,101 tests, offline and keyless |
+| **Engine** | Working. 1,105 tests, offline and keyless |
 | **CLI** | Working, every flag |
 | **MCP server** | Working, five tools over stdio |
 | **JavaScript SDK** | Working, 11 methods |
@@ -193,7 +193,7 @@ Requires **Node 22.18 or newer**, and nothing else.
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 1,101 tests, offline, no keys
+npm test          # 1,105 tests, offline, no keys
 ```
 
 Then research something. The input is a **subject**, not a URL. Plain text
@@ -416,7 +416,10 @@ verify with an off the shelf library rather than with code we invented:
 | `webhook-signature` | `v1,{base64 hmac-sha256}`, a space delimited list |
 
 The signed content is `{webhook-id}.{webhook-timestamp}.{body}`, and the key is
-the base64 body of your secret, not the `whsec_` label.
+the base64 body of your secret, not the `whsec_` label. **Your secret is the
+`webhookSecret` field on `GET /v1/usage`**: scoped to your key, stable, and
+derived rather than stored, so it rotates exactly when the operator rotates the
+instance secret and never behind your back.
 
 ```js
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -551,7 +554,7 @@ checkable, and it answers in single digit milliseconds against a warm corpus.
 | | |
 |---|---|
 | `POST /v1/verify` | Hand it claims with receipt ids and it re-resolves every one against the corpus. **It will verify our own output or anybody else's.** |
-| `GET /v1/usage` | What this key has used and what it is allowed. |
+| `GET /v1/usage` | What this key has used, what it is allowed, and its webhook signing secret. |
 | `GET /v1/healthz` | Liveness. Touches no database, and is never rate limited. |
 
 ### Limits
@@ -690,7 +693,7 @@ npm run test:postgres  # the driver against a real server, needs QUORUM_PG_URL
 
 CI runs the test suite inside a network namespace with no route off the host, so
 an adapter that quietly reaches for the wire fails immediately instead of flaking
-later. Three of the 1,101 tests need a real PostgreSQL server and skip without
+later. Three of the 1,105 tests need a real PostgreSQL server and skip without
 `QUORUM_PG_URL`.
 
 ## License

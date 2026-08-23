@@ -309,7 +309,9 @@ export function createQuotas(limits: QuotaLimits = DEFAULT_LIMITS): Quotas {
 /* Which meter a route counts against, decided by path rather than by handler
  * so a new route cannot be added without landing in one of the two. */
 export function meterFor(method: string, pathname: string): Meter {
-  if (pathname === '/v1/healthz') return 'exempt';
+  /* The root signpost and the health check read nothing and are keyless, so
+   * there is no allowance to count them against. */
+  if (pathname === '/' || pathname === '/v1/healthz') return 'exempt';
   if (pathname === '/v1/reports' && method === 'POST') return 'reports';
   return 'lookups';
 }

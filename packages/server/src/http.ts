@@ -35,7 +35,7 @@ import { isReceiptId } from '@quorum/corpus';
 import { scoreKindOf, tierOf } from '@quorum/corpus/tiers';
 import { resolveCitations, fabricationReport, type ModelClaim } from '@quorum/core';
 import type { JobQueue, ReportRequest, ReportSnapshot } from './jobs.ts';
-import { checkWebhookUrl } from './webhooks.ts';
+import { checkWebhookUrl, deriveSecret } from './webhooks.ts';
 
 export interface ServerOptions {
   corpus: CorpusDriver;
@@ -52,6 +52,14 @@ export interface ServerOptions {
    * one.
    */
   quotas?: Quotas;
+  /*
+   * The webhook instance secret, when webhooks are enabled. Used for exactly
+   * one thing here: deriving the CALLING key's signing secret so GET /v1/usage
+   * can hand a customer the one secret that is theirs. The instance secret
+   * itself is never returned; what a caller sees is already one HMAC away
+   * from it.
+   */
+  webhookSecret?: string;
   maxBodyBytes?: number;
   /*
    * Event loop lag, in milliseconds, above which the server SHEDS LOAD.
@@ -309,6 +317,21 @@ export function createReceiptsServer(options: ServerOptions): Server {
   const routes: { method: string; pattern: RegExp; handler?: Handler; stream?: Streamer }[] = [
     {
       method: 'GET',
+      pattern: /^\/$/,
+      handler: async () => ({
+        status: 200,
+        body: {
+          name: 'quorum',
+          description: 'Market evidence with receipts. Every claim resolves to a real stored record.',
+          spec: 'https://github.com/Godzilla-lab/Quorum-API/blob/main/spec/openapi.yaml',
+          source: 'https://github.com/Godzilla-lab/Quorum-API',
+          health: '/v1/healthz',
+          authenticate: 'send your key as a Bearer token in the Authorization header, on every /v1 path',
+        },
+      }),
+    },
+    {
+      method: 'GET',
       pattern: /^\/v1\/healthz$/,
       handler: async () => ({ status: 200, body: { ok: true } }),
     },
@@ -322,6 +345,20 @@ export function createReceiptsServer(options: ServerOptions): Server {
       method: 'GET',
       pattern: /^\/v1\/usage$/,
       handler: async (ctx) => {
+        /*
+         * THE ONE PLACE A CUSTOMER GETS THEIR WEBHOOK SIGNING SECRET. Usage is
+         * already scoped to the calling key, which makes it the natural
+         * self-serve channel: each caller sees exactly their own secret and
+         * nobody's else. Null when webhooks are off, because a secret that
+         * signs nothing is not worth inventing. Before this field existed the
+         * secret was derivable only by the operator, by hand, out of band,
+         * which meant every onboarding included a step nobody had written
+         * down.
+         */
+        const webhookSecret = options.webhookSecret
+          ? deriveSecret(options.webhookSecret, ctx.keyLabel)
+          : null;
+
         if (!quotas) {
           return {
             status: 200,
@@ -333,6 +370,7 @@ export function createReceiptsServer(options: ServerOptions): Server {
               lookups: { used: 0, limit: 0, remaining: 0 },
               concurrentReports: { running: 0, limit: 0 },
               spendUsd: 0,
+              webhookSecret,
               note: 'this instance runs without quotas, so nothing is counted',
             },
           };
@@ -340,7 +378,7 @@ export function createReceiptsServer(options: ServerOptions): Server {
         /* No queue means reports are not served here at all, so nothing of this
          * key's can be in flight. Zero is the true answer, not a fallback. */
         const running = queue ? queue.runningFor(ctx.keyLabel) : 0;
-        return { status: 200, body: quotas.snapshot(ctx.keyLabel, running) };
+        return { status: 200, body: { ...quotas.snapshot(ctx.keyLabel, running), webhookSecret } };
       },
     },
 
@@ -709,7 +747,14 @@ export function createReceiptsServer(options: ServerOptions): Server {
          * request its own quota would mean there is no quota.
          */
         let keyLabel = 'self-hosted';
-        if (requireAuth && url.pathname !== '/v1/healthz') {
+        /*
+         * The root is a signpost, not a surface: static json naming the
+         * project, the spec and how to authenticate. It exists because the
+         * first thing anyone does with an api host is open it in a browser,
+         * and a bare 401 teaches them nothing. Exempt from auth and from the
+         * meters for the same reason healthz is: it reads nothing.
+         */
+        if (requireAuth && url.pathname !== '/v1/healthz' && url.pathname !== '/') {
           const header = req.headers.authorization ?? '';
           const presented = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
           const label = presented && keyHashes ? keyMatches(presented, keyHashes) : null;
