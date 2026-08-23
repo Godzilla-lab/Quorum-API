@@ -153,6 +153,23 @@ export interface QueueOptions {
   idempotencyTtlMs?: number;
   /* Injected so a test can run at a fixed instant. Unix milliseconds. */
   now?: () => number;
+  /*
+   * Records a completed report's webhook, if it asked for one.
+   *
+   * INJECTED RATHER THAN CALLED DIRECTLY, because this module reaches neither
+   * the corpus nor the network, the same reason `claimsFor` is injected. It
+   * writes a row and returns; it does not deliver. Delivery is a separate
+   * worker on its own schedule, so a slow receiver can never hold up the queue.
+   */
+  enqueueWebhook?(delivery: {
+    reportId: string;
+    /* The tenant that owns the row. The calling key, same as the report. */
+    tenantId: string;
+    keyLabel: string;
+    url: string;
+    /* The exact bytes to sign and send, identical to GET /v1/reports/{id}. */
+    payload: string;
+  }): Promise<void>;
   /* Warm or cold, for `estimatedSeconds`. Optional: a null estimate is honest
    * and a made up one is not. */
   estimateSeconds?(category: string): Promise<number | null>;
@@ -312,6 +329,16 @@ export function createJobQueue(options: QueueOptions): JobQueue {
     [...request.communities].sort(),
     [...request.sources].sort(),
     request.includeAds, request.offline, request.capUsd ?? null, request.deadlineMs ?? null,
+    /*
+     * THE WEBHOOK URL IS PART OF THE REQUEST, so two submits that differ only
+     * in where the answer should be sent are two different requests.
+     *
+     * It was omitted until 2026-08-23, which meant a caller reusing an
+     * Idempotency-Key with a new webhook url got the first submit replayed and
+     * their new url silently dropped: no error, no delivery, nothing to see.
+     * Included, the second submit is a 409 and says so.
+     */
+    request.webhookUrl ?? null,
   ]);
 
   function emit(report: Report, type: JobEvent['type'], data: unknown): void {
@@ -331,12 +358,46 @@ export function createJobQueue(options: QueueOptions): JobQueue {
     }
   };
 
-  function finishReport(report: Report, status: ReportStatus, error: string | null): void {
+  /*
+   * The single terminal path for a report, and therefore the one place a
+   * webhook is recorded.
+   *
+   * `cancel` deliberately does not come through here, which is correct: a
+   * caller who cancelled does not need to be told their report finished.
+   *
+   * A WEBHOOK BELONGS TO A REPORT, NEVER TO A RUN. One coalesced run serves
+   * many reports, each with its own url and its own terminal moment inside the
+   * settle loop. Fanning out from the run would send one caller's report to
+   * another caller's endpoint.
+   *
+   * The enqueue is AWAITED so the row is durable before the report is
+   * considered done. The delivery is not: it happens on the worker's schedule.
+   * An enqueue that throws must not fail the report, because the report itself
+   * succeeded and is readable over the API.
+   */
+  async function finishReport(report: Report, status: ReportStatus, error: string | null): Promise<void> {
     report.status = status;
     report.completedAt = now();
     report.error = error;
     if (status === 'failed') emit(report, 'error', { message: error });
     else emit(report, 'done', { status });
+
+    const url = report.request.webhookUrl;
+    if (!url || !options.enqueueWebhook) return;
+    try {
+      await options.enqueueWebhook({
+        reportId: report.id,
+        tenantId: report.keyLabel,
+        keyLabel: report.keyLabel,
+        url,
+        /*
+         * Byte identical to what GET /v1/reports/{id} serves, including the two
+         * space indentation, because the bytes signed must be the bytes a
+         * receiver can compare against the API.
+         */
+        payload: JSON.stringify(snapshot(report), null, 2),
+      });
+    } catch { /* a webhook that cannot be queued must not fail a good report */ }
   }
 
   async function settle(run: Run): Promise<void> {
@@ -349,13 +410,13 @@ export function createJobQueue(options: QueueOptions): JobQueue {
     for (const id of [...run.reports]) {
       const report = reports.get(id);
       if (!report || report.status === 'cancelled') continue;
-      if (!outcome) { finishReport(report, 'failed', run.error ?? 'the run did not complete'); continue; }
+      if (!outcome) { await finishReport(report, 'failed', run.error ?? 'the run did not complete'); continue; }
       try {
         report.claims = await options.claimsFor(outcome, report.request.terms);
         for (const finding of report.claims.findings) emit(report, 'finding', finding);
-        finishReport(report, 'complete', null);
+        await finishReport(report, 'complete', null);
       } catch (cause) {
-        finishReport(report, 'failed', cause instanceof Error ? cause.message : String(cause));
+        await finishReport(report, 'failed', cause instanceof Error ? cause.message : String(cause));
       }
     }
   }
@@ -410,8 +471,17 @@ export function createJobQueue(options: QueueOptions): JobQueue {
     }
   }
 
-  /* The request a run executes: the terms of every report attached when it
-   * started, so one retrieval serves all of their questions. */
+  /*
+   * The request a run executes: the terms of every report attached when it
+   * started, so one retrieval serves all of their questions.
+   *
+   * NOTE WHAT THIS SPREAD CARRIES AND WHAT MUST NEVER READ IT. It copies the
+   * FIRST attached report's fields, so `webhookUrl` here is one arbitrary
+   * caller's url out of however many joined the run. That is harmless only
+   * because delivery is per report and reads `report.request.webhookUrl`
+   * instead. Nothing may ever deliver from a run request, and this is not an
+   * intent worth inferring from the code.
+   */
   function runRequest(run: Run): ReportRequest {
     const first = reports.get([...run.reports][0]!)!;
     return { ...first.request, terms: run.plannedTerms };
@@ -590,7 +660,23 @@ export function createJobQueue(options: QueueOptions): JobQueue {
        * registration cannot be interleaved by another submit. This is the first
        * await and it touches nothing. */
       pump();
-      const estimatedSeconds = options.estimateSeconds ? await options.estimateSeconds(key) : null;
+
+      /*
+       * AN ESTIMATE THAT CANNOT BE COMPUTED IS NULL, NEVER A REFUSAL. The
+       * estimate reads categoryStats, which is a database call, and until
+       * 2026-08-23 a failure there took the whole submit down as a 500: the
+       * job was registered, the run was pumping, and the caller was told the
+       * request could not be completed, all because a COSMETIC number timed
+       * out. Found by an end to end run against the real database while it was
+       * under load, which is exactly the moment a free tier database produces
+       * timeouts. A null estimate is honest and the option doc has always said
+       * so; now the code agrees.
+       */
+      let estimatedSeconds: number | null = null;
+      if (options.estimateSeconds) {
+        try { estimatedSeconds = await options.estimateSeconds(key); }
+        catch { estimatedSeconds = null; }
+      }
 
       return {
         ok: true,

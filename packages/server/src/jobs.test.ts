@@ -80,13 +80,22 @@ function claimsRecorder() {
   return { claimsFor, asked };
 }
 
+/*
+ * Wait for a run to reach its terminal state.
+ *
+ * THIS USED TO BE FOUR MICROTASK TURNS, chosen because the settle path was one
+ * turn for the runner's promise and one for the per report claims loop in its
+ * `finally`. On 2026-08-23 `finishReport` became async, so each report in the
+ * loop costs additional turns, and a fixed count silently stopped covering the
+ * SECOND report of a coalesced run: a test asserting two webhooks saw one, and
+ * the code was right.
+ *
+ * A macrotask boundary drains every pending microtask however many there are,
+ * so this no longer has to be kept in step with the number of awaits on the
+ * path. Counting turns was the bug.
+ */
 const settled = async (): Promise<void> => {
-  /* Two turns: one for the runner's promise, one for the per report claims
-   * loop that runs in its `finally`. */
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await new Promise((resolve) => { setTimeout(resolve, 0); });
 };
 
 function queue(over: Partial<Parameters<typeof createJobQueue>[0]> = {}) {
@@ -516,4 +525,166 @@ test('THE CLAIMS FUNCTION SEES WHAT THE RUN ACTUALLY DID, NOT JUST ITS CATEGORY'
   await settled();
 
   assert.deepEqual(seen, [{ retrieval: { totalSeen: 41, totalWritten: 22 }, subjectResolved: true }]);
+});
+
+/* ------------------------------------------------------------------ */
+/* webhooks                                                            */
+/* ------------------------------------------------------------------ */
+
+/* Records what the queue asked to have delivered, without delivering it. */
+function webhookRecorder() {
+  const enqueued: { reportId: string; tenantId: string; keyLabel: string; url: string; payload: string }[] = [];
+  return {
+    enqueued,
+    enqueueWebhook: async (d: { reportId: string; tenantId: string; keyLabel: string; url: string; payload: string }) => {
+      enqueued.push(d);
+    },
+  };
+}
+
+test('a completed report with a webhook url is queued for delivery', async () => {
+  const hook = webhookRecorder();
+  const { q, runner } = queue({ enqueueWebhook: hook.enqueueWebhook });
+  const accepted = await q.submit(request({ webhookUrl: 'https://receiver.example/hook' }), { keyLabel: 'key-1' });
+  runner.finish();
+  await settled();
+
+  assert.equal(hook.enqueued.length, 1);
+  assert.equal(hook.enqueued[0]?.url, 'https://receiver.example/hook');
+  assert.equal(hook.enqueued[0]?.keyLabel, 'key-1', 'the key label selects the signing secret');
+  /* The row is tenant owned. It carried NULL until 2026-08-23, which made its
+   * RLS policy match nothing, exactly as reports did. */
+  assert.equal(hook.enqueued[0]?.tenantId, 'key-1', 'the delivery row must name its tenant');
+  assert.equal(hook.enqueued[0]?.reportId, (accepted as { accepted: { id: string } }).accepted.id);
+});
+
+/*
+ * The payload has to be the same bytes GET /v1/reports/{id} serves, because
+ * that is what a receiver compares against and what the signature covers.
+ */
+test('the queued payload is byte identical to the report body', async () => {
+  const hook = webhookRecorder();
+  const { q, runner } = queue({ enqueueWebhook: hook.enqueueWebhook });
+  const accepted = await q.submit(request({ webhookUrl: 'https://receiver.example/hook' }), { keyLabel: 'key-1' });
+  runner.finish();
+  await settled();
+
+  const id = (accepted as { accepted: { id: string } }).accepted.id;
+  assert.equal(hook.enqueued[0]?.payload, JSON.stringify(q.get(id), null, 2));
+});
+
+test('a report with no webhook url queues nothing', async () => {
+  const hook = webhookRecorder();
+  const { q, runner } = queue({ enqueueWebhook: hook.enqueueWebhook });
+  await q.submit(request(), { keyLabel: 'key-1' });
+  runner.finish();
+  await settled();
+  assert.deepEqual(hook.enqueued, []);
+});
+
+/* A caller who cancelled does not need to be told their report finished, which
+ * is why cancel deliberately bypasses the terminal path. */
+test('a cancelled report never fires its webhook', async () => {
+  const hook = webhookRecorder();
+  const { q, runner } = queue({ enqueueWebhook: hook.enqueueWebhook });
+  const accepted = await q.submit(request({ webhookUrl: 'https://receiver.example/hook' }), { keyLabel: 'key-1' });
+  q.cancel((accepted as { accepted: { id: string } }).accepted.id);
+  runner.finish();
+  await settled();
+  assert.deepEqual(hook.enqueued, []);
+});
+
+test('a failed report still fires its webhook, because failure is an outcome', async () => {
+  const hook = webhookRecorder();
+  const { q, runner } = queue({ enqueueWebhook: hook.enqueueWebhook });
+  await q.submit(request({ webhookUrl: 'https://receiver.example/hook' }), { keyLabel: 'key-1' });
+  runner.throw('upstream fell over');
+  await settled();
+  assert.equal(hook.enqueued.length, 1);
+});
+
+/*
+ * THE COALESCING CASE, which is where a webhook implementation goes wrong.
+ * One run serves both reports, and each must go to its own caller's url. A
+ * fan out from the run would send one customer's report to another's endpoint.
+ */
+test('two reports coalesced onto one run each get their own webhook', async () => {
+  const hook = webhookRecorder();
+  const { q, runner } = queue({ enqueueWebhook: hook.enqueueWebhook });
+  await q.submit(request({ webhookUrl: 'https://first.example/hook' }), { keyLabel: 'key-1' });
+  await q.submit(request({ webhookUrl: 'https://second.example/hook' }), { keyLabel: 'key-2' });
+  runner.finish();
+  await settled();
+
+  assert.equal(runner.calls.length, 1, 'one retrieval serves both');
+  assert.equal(hook.enqueued.length, 2);
+  assert.deepEqual(
+    hook.enqueued.map((e) => e.url).sort(),
+    ['https://first.example/hook', 'https://second.example/hook'],
+  );
+  assert.deepEqual(hook.enqueued.map((e) => e.keyLabel).sort(), ['key-1', 'key-2']);
+  assert.deepEqual(hook.enqueued.map((e) => e.tenantId).sort(), ['key-1', 'key-2'],
+    'each delivery belongs to the caller that asked for it, never to the run');
+});
+
+/* An enqueue that throws must not fail a report that itself succeeded and is
+ * readable over the API. */
+test('a webhook that cannot be queued does not fail the report', async () => {
+  const { q, runner } = queue({ enqueueWebhook: async () => { throw new Error('database is down'); } });
+  const accepted = await q.submit(request({ webhookUrl: 'https://receiver.example/hook' }), { keyLabel: 'key-1' });
+  runner.finish();
+  await settled();
+  assert.equal(q.get((accepted as { accepted: { id: string } }).accepted.id)?.status, 'complete');
+});
+
+/*
+ * The idempotency fingerprint omitted webhookUrl until 2026-08-23, so a caller
+ * reusing a key with a new url got the first submit replayed and their new url
+ * silently dropped. Silent is the part that matters.
+ */
+test('reusing an idempotency key with a different webhook url is a conflict', async () => {
+  const { q } = queue();
+  const first = await q.submit(
+    request({ webhookUrl: 'https://first.example/hook' }),
+    { keyLabel: 'key-1', idempotencyKey: 'same-key' },
+  );
+  assert.equal(first.ok, true);
+
+  const second = await q.submit(
+    request({ webhookUrl: 'https://second.example/hook' }),
+    { keyLabel: 'key-1', idempotencyKey: 'same-key' },
+  );
+  assert.equal(second.ok, false, 'a different destination is a different request, not a replay');
+  assert.equal((second as { status: number }).status, 409);
+});
+
+test('reusing an idempotency key with the same webhook url is still a replay', async () => {
+  const { q } = queue();
+  const first = await q.submit(
+    request({ webhookUrl: 'https://first.example/hook' }),
+    { keyLabel: 'key-1', idempotencyKey: 'same-key' },
+  );
+  const second = await q.submit(
+    request({ webhookUrl: 'https://first.example/hook' }),
+    { keyLabel: 'key-1', idempotencyKey: 'same-key' },
+  );
+  assert.equal(second.ok, true);
+  assert.equal(
+    (second as { accepted: { id: string } }).accepted.id,
+    (first as { accepted: { id: string } }).accepted.id,
+  );
+});
+
+/*
+ * The estimate is cosmetic, and a cosmetic number must never refuse a submit.
+ * Until 2026-08-23 estimateSeconds throwing (a database timeout while the free
+ * tier instance wakes) 500ed the whole POST even though the job was already
+ * registered and running. Found end to end against the real database under
+ * load, which no unit test had simulated.
+ */
+test('an estimate that cannot be computed degrades to null, never a refusal', async () => {
+  const { q } = queue({ estimateSeconds: async () => { throw new Error('Connection terminated due to connection timeout'); } });
+  const accepted = await q.submit(request(), { keyLabel: 'key-1' });
+  assert.equal(accepted.ok, true, 'the submit must be accepted');
+  assert.equal((accepted as { accepted: { estimatedSeconds: number | null } }).accepted.estimatedSeconds, null);
 });

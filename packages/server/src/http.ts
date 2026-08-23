@@ -35,6 +35,7 @@ import { isReceiptId } from '@quorum/corpus';
 import { scoreKindOf, tierOf } from '@quorum/corpus/tiers';
 import { resolveCitations, fabricationReport, type ModelClaim } from '@quorum/core';
 import type { JobQueue, ReportRequest, ReportSnapshot } from './jobs.ts';
+import { checkWebhookUrl } from './webhooks.ts';
 
 export interface ServerOptions {
   corpus: CorpusDriver;
@@ -127,6 +128,25 @@ const MAX_BODY = 1024 * 1024;
 const MAX_LAG_MS = 250;
 /* How often lag is sampled. Cheap: one timer, no work in the callback. */
 const LAG_SAMPLE_MS = 20;
+
+/*
+ * THE RATE LIMIT HEADER NAMES, IN ONE PLACE AND EXPORTED.
+ *
+ * They were written as three string literals here while spec/openapi.yaml
+ * declared `RateLimit-Limit` without the prefix and the README documented a
+ * third spelling. Three documents, two behaviours, and nothing that could
+ * notice. Exported so check-spec.mjs asserts the spec quotes these exact names
+ * rather than a plausible looking guess.
+ *
+ * `x-` prefixed rather than the IETF draft spelling, because that is what has
+ * shipped and what callers are already reading. Changing the wire names is a
+ * breaking change and belongs to a version bump, not to a tidy up.
+ */
+export const RATE_LIMIT_HEADERS = {
+  limit: 'x-ratelimit-limit',
+  remaining: 'x-ratelimit-remaining',
+  reset: 'x-ratelimit-reset',
+} as const;
 
 export const hashKey = (key: string): string => createHash('sha256').update(key, 'utf8').digest('hex');
 
@@ -242,8 +262,33 @@ export function createReceiptsServer(options: ServerOptions): Server {
     if (deadlineMs !== undefined && (typeof deadlineMs !== 'number' || deadlineMs < 1000)) {
       return 'deadlineMs must be at least 1000';
     }
+    /*
+     * THE URL IS CHECKED HERE, AND CHECKED AGAIN AT DELIVERY, FOR DIFFERENT
+     * REASONS.
+     *
+     * This check is cheap, synchronous, and its job is a fast 400 on an
+     * obviously wrong url. It is NOT the security boundary: everything decided
+     * here can change before the delivery happens.
+     *
+     * DNS IS DELIBERATELY NOT RESOLVED AT THIS POINT. A submit time address
+     * check reads like diligence and is theatre, because the attacker owns the
+     * DNS answer and can change it between this moment and the connection. The
+     * check that counts is the one safeFetch makes at connect time against the
+     * address it then pins. Doing it here as well would only invite somebody
+     * later to conclude the real one is redundant.
+     *
+     * Until 2026-08-23 this line was `typeof webhookUrl !== 'string'`, while
+     * spec/openapi.yaml promised a scheme allowlist, a resolved and checked
+     * address, a pinned connection and revalidated redirects. Nothing was
+     * exploitable because nothing was delivered, but the document a customer
+     * read was false.
+     */
     const webhookUrl = body?.['webhookUrl'];
-    if (webhookUrl !== undefined && typeof webhookUrl !== 'string') return 'webhookUrl must be a url';
+    if (webhookUrl !== undefined) {
+      if (typeof webhookUrl !== 'string') return 'webhookUrl must be a url';
+      const verdict = checkWebhookUrl(webhookUrl);
+      if (!verdict.ok) return verdict.reason;
+    }
 
     return {
       subject,

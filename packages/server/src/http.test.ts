@@ -461,3 +461,50 @@ test('two keys do not share an idempotency namespace', async () => {
     assert.notEqual(mine.id, theirs.id);
   } finally { await s.close(); }
 });
+
+/* ------------------------------------------------------------------ */
+/* the webhook url, refused at the door                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The end to end negative case. spec/openapi.yaml has always promised that a
+ * webhook url is validated against the same rules as every other url this
+ * service touches; until 2026-08-23 the code behind that sentence was
+ * `typeof webhookUrl !== 'string'`. These assert the promise over real HTTP,
+ * because that is the surface a customer actually meets.
+ */
+test('a webhook url pointing into private space is refused at submit', async () => {
+  const s = await live({ withQueue: true });
+  try {
+    for (const webhookUrl of [
+      'https://169.254.169.254/',          /* cloud metadata */
+      'https://127.0.0.1/hook',            /* loopback */
+      'https://10.0.0.1/hook',             /* RFC1918 */
+      'http://receiver.example/hook',      /* plaintext publishes the report on the path */
+      'https://user:pass@receiver.example/hook',
+      'not-a-url',
+    ]) {
+      const res = await start(s.base, { subject: 'wool runner', webhookUrl });
+      assert.equal(res.status, 400, `${webhookUrl} must be refused`);
+      const body = await res.json() as { error: { type: string; message: string } };
+      assert.equal(body.error.type, 'invalid_request');
+      assert.match(body.error.message, /webhookUrl/);
+    }
+  } finally { await s.close(); }
+});
+
+test('a well formed https webhook url is accepted', async () => {
+  const s = await live({ withQueue: true });
+  try {
+    const res = await start(s.base, { subject: 'wool runner', webhookUrl: 'https://receiver.example/hook' });
+    assert.equal(res.status, 202);
+  } finally { await s.close(); }
+});
+
+test('a webhookUrl that is not a string is still refused', async () => {
+  const s = await live({ withQueue: true });
+  try {
+    const res = await start(s.base, { subject: 'wool runner', webhookUrl: 42 });
+    assert.equal(res.status, 400);
+  } finally { await s.close(); }
+});

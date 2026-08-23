@@ -33,6 +33,7 @@ import { readFileSync } from 'node:fs';
 import { createQuotas, DEFAULT_LIMITS } from './quotas.ts';
 import { openPostgres } from './postgres.ts';
 import { createJobQueue, type ReportRequest, type RunOutcome } from './jobs.ts';
+import { checkInstanceSecret, createWebhookWorker } from './webhooks.ts';
 import type { RetrievalResult } from '@quorum/core';
 import { computeClaims } from './claims.ts';
 
@@ -66,6 +67,26 @@ const concurrency = Number(process.env['QUORUM_CONCURRENCY'] ?? 2);
 const maxCapUsd = Number(process.env['QUORUM_MAX_CAP_USD'] ?? 0);
 const spendPerKeyUsd = Number(process.env['QUORUM_SPEND_PER_KEY_USD'] ?? 0);
 const spendTotalUsd = Number(process.env['QUORUM_SPEND_TOTAL_USD'] ?? 0);
+
+/*
+ * WEBHOOKS ARE OFF UNTIL A SECRET IS SET, the same shape as the budget above.
+ *
+ * Every per key signing secret is derived from this one, so without it there is
+ * nothing to sign with and a delivery would be unverifiable. Off is the honest
+ * default: `webhookUrl` is still validated and still rejected if it points
+ * somewhere it should not, it is simply never called, and the banner says so.
+ *
+ * A SHORT SECRET IS REFUSED RATHER THAN ACCEPTED, because its failure mode is
+ * silence. Everything signs, everything verifies, and the signature is merely
+ * easier to forge than anybody believes.
+ */
+const webhookSecret = process.env['QUORUM_WEBHOOK_SECRET'] ?? '';
+const webhookVerdict = webhookSecret ? checkInstanceSecret(webhookSecret) : null;
+if (webhookVerdict && !webhookVerdict.ok) {
+  process.stderr.write(`webhooks: refusing to start. ${webhookVerdict.reason}\n`);
+  process.exit(1);
+}
+const webhooksOn = webhookSecret.length > 0;
 
 /*
  * POSTGRES WHEN A URL IS SET, SQLITE OTHERWISE.
@@ -110,6 +131,21 @@ const corpus = postgres ? postgres.driver : openSqliteCorpus({ path: corpusPath 
 const WARM_SECONDS = 2;
 const COLD_SECONDS = 60;
 
+/*
+ * Deliveries are durable because the hosted tier sleeps. A queue held in this
+ * process would lose every pending delivery on the next redeploy, which makes
+ * the 75 hour retry schedule a decoration. Outstanding rows are picked up on
+ * boot simply by being due.
+ */
+const webhookWorker = webhooksOn
+  ? createWebhookWorker({
+    corpus,
+    instanceSecret: webhookSecret,
+    log: (message) => process.stderr.write(`${message}\n`),
+  })
+  : null;
+webhookWorker?.start();
+
 const queue = createJobQueue({
   concurrency,
 
@@ -143,6 +179,11 @@ const queue = createJobQueue({
      */
     const result: RunResult = await runResearch(
       {
+        /*
+         * The calling key IS the tenant here, and this is the line that keeps
+         * one customer's prior report out of another customer's diff.
+         */
+        tenantId: ctx.keyLabel,
         subject: request.subject,
         terms: request.terms,
         communities: request.communities,
@@ -256,6 +297,13 @@ const queue = createJobQueue({
     const stats = await corpus.categoryStats(category);
     return isWarm(stats.docs, stats.ageDays) ? WARM_SECONDS : COLD_SECONDS;
   },
+
+  /*
+   * Recording only. The queue writes a row and returns; the worker below
+   * delivers on its own schedule, so a receiver taking ten seconds can never
+   * hold up the next report.
+   */
+  ...(webhookWorker ? { enqueueWebhook: (d) => webhookWorker.enqueue(d) } : {}),
 });
 
 /*
@@ -297,6 +345,14 @@ server.listen(port, () => {
       : 'budget: metered sources OFF, so ads are skipped. Set QUORUM_SPEND_PER_KEY_USD, '
         + 'QUORUM_SPEND_TOTAL_USD and QUORUM_MAX_CAP_USD to enable them.\n',
   );
+  /* Configured, not default, for the reason given above the limits line. */
+  process.stderr.write(
+    webhooksOn
+      ? 'webhooks: ON. Completed reports POST to their webhookUrl, signed to the '
+        + 'Standard Webhooks spec, retried for about 75 hours.\n'
+      : 'webhooks: OFF, so webhookUrl is validated and accepted but never called. '
+        + 'Set QUORUM_WEBHOOK_SECRET to enable delivery.\n',
+  );
   process.stderr.write('live: /v1/reports /v1/reports/:id /v1/reports/:id/stream /v1/healthz /v1/evidence/:id\n');
   process.stderr.write('      /v1/evidence/batch /v1/evidence/search /v1/verify /v1/categories/:slug\n');
   process.stderr.write('      /v1/evidence/ads/:id /v1/usage\n');
@@ -308,6 +364,14 @@ const shutdown = (): void => {
    * minute forty still leaves the archive better than it found it. */
   queue.shutdown();
   /*
+   * The timer is stopped, and nothing is drained. A row is marked only after
+   * its attempt finishes, so a delivery interrupted here is still pending and
+   * the next boot picks it up. Draining would turn a hung receiver into a
+   * process that will not exit, and the webhook-id header is what lets a
+   * receiver deduplicate the one delivery this can send twice.
+   */
+  webhookWorker?.stop();
+  /*
    * The pool is drained AFTER the server stops accepting, so a request already
    * in flight still has a connection to finish on. Closing it first would fail
    * the very requests a graceful shutdown exists to protect.
@@ -315,6 +379,18 @@ const shutdown = (): void => {
   server.close(() => {
     void corpus.close()
       .then(() => (postgres ? postgres.end() : undefined))
+      /*
+       * A close that fails must not turn a shutdown into a crash. Without this
+       * catch, a pool already broken by the database going away rejected the
+       * chain, node treated it as an unhandled rejection, and every unclean
+       * shutdown exited 1 with a stack trace, which a host reads as a failed
+       * restart. The server has already stopped accepting by this line, so
+       * there is nothing left to protect: report it and leave normally.
+       */
+      .catch((cause) => process.stderr.write(
+        `shutdown: closing the corpus failed, exiting anyway: ${cause instanceof Error ? cause.message : String(cause)}
+`,
+      ))
       .then(() => process.exit(0));
   });
 };
