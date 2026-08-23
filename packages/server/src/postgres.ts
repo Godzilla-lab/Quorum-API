@@ -166,8 +166,13 @@ export function openPostgres(options: PostgresOptions): PostgresCorpus {
       if (!wantsTls) return `${url.hostname}:${url.port || 5432}, UNENCRYPTED`;
       return verified
         ? `${url.hostname}:${url.port || 5432}, tls with the certificate verified`
-        : `${url.hostname}:${url.port || 5432}, tls but the certificate is NOT verified (sslmode=require). `
-          + 'Set QUORUM_PG_CA to verify.';
+        /* Names BOTH variables, because the one you need depends on where this
+         * is running and the banner is read by somebody trying to fix it. A
+         * hosting platform hands you environment variables and not files, so
+         * telling a Render operator to set a file path sends them looking for
+         * a filesystem they do not have. */
+        : `${url.hostname}:${url.port || 5432}, tls but the certificate is NOT verified. `
+          + 'Paste the provider CA into QUORUM_PG_CA_PEM, or point QUORUM_PG_CA at a file, to verify it.';
     },
   };
 }
