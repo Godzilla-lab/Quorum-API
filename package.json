@@ -17,12 +17,13 @@
     "lint": "tsc -b",
     "lint:copy": "node scripts/check-copy.mjs",
     "check:security": "node scripts/check-security.mjs",
-    "verify": "npm run build && npm test && npm run lint:copy && npm run check:security && npm run check:drift:fixtures && npm run check:spec",
+    "verify": "npm run build && npm test && npm run lint:copy && npm run check:security && npm run check:drift:fixtures && npm run check:spec && npm run check:readme -- --tests",
     "check:drift": "node scripts/check-drift.mjs",
     "check:drift:fixtures": "node scripts/check-drift.mjs --fixtures",
     "check:spec": "node --disable-warning=ExperimentalWarning scripts/check-spec.mjs",
     "check:parity": "node --disable-warning=ExperimentalWarning scripts/parity.mjs",
-    "test:postgres": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"packages/corpus/src/drivers/postgres.{conformance,rls,concurrency}.test.ts\""
+    "test:postgres": "node --disable-warning=ExperimentalWarning --test --test-concurrency=1 \"packages/corpus/src/drivers/postgres.{conformance,rls,concurrency}.test.ts\"",
+    "check:readme": "node scripts/check-readme.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
