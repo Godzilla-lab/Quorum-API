@@ -21,36 +21,23 @@ record you can fetch back.
 posted, when, and its permalink. A customer of your customer can click a claim
 and read the human who said it.
 
-> **Status: early.** The scaffold and the corpus constants are in. Everything
-> else is being ported from a working 4,000 line engine that lives elsewhere.
-> Nothing is published. Do not depend on this yet.
+> **Status: working, unpublished.** The pipeline runs end to end, 953 tests pass
+> offline with no keys, and the Postgres schema is applied and verified against
+> a real PostgreSQL 18. Not on npm, and nothing is deployed. The MCP server and
+> the JavaScript SDK are placeholders. Do not depend on the API shape yet.
 
-## Why this and not a search API
+## Requirements
 
-Plenty of research APIs return citations now. Two things are different here.
+**Node 22.18 or newer**, and nothing else. The engine has **zero runtime
+dependencies**: no framework, no ORM, no HTTP client, no test runner. That is a
+deliberate constraint rather than a boast, because every dependency in a tool
+that fetches untrusted text from the public internet is another thing that can
+reach the network on your behalf.
 
-**A receipt does not rot.** Their citation is a URL captured at query time
-against a live index, and it dies when the page does. A receipt is a stable id
-into a retained corpus, and it resolves identically forever, including after the
-source deletes the original.
-
-**Corroboration is a number, not a vibe.** A claim needs at least three
-independent records before it is printed as a finding, and the count travels
-with it. No search API can tell you "31 independent records across 5 channels",
-because none of them keep a corpus to count against.
-
-That second property is also the prompt injection defence. A single planted
-comment cannot become a finding, because it cannot corroborate itself.
-
-## The part people miss
-
-Meta does not archive inactive commercial ads. Once a campaign stops running,
-the record that it ran for 94 days is gone, and no amount of money brings it
-back. Shopify drops delisted products from `/products.json` the day they are
-pulled.
-
-So the corpus is not a cache. For those sources it is the only copy that will
-ever exist, and it only exists because something was recording on the day.
+No key is required for anything. Reddit through a public archive, Hacker News,
+the App Store, and four government safety archives are all free and keyless.
+Keys only ever ADD sources, and a missing one degrades a run rather than
+failing it. Copy `.env.example` to `.env` to see the full list.
 
 ## Quickstart
 
@@ -101,7 +88,86 @@ can be chased and is never stated as a market pattern. Before anything is
 printed, every cited receipt is fetched back out of the corpus, and the run
 exits non zero if one of them does not resolve.
 
-`quorum --help` lists the flags. The API contract is in `spec/`.
+`quorum --help` lists the flags.
+
+## What the API does
+
+Ten endpoints. The full contract, with schemas, is `spec/openapi.yaml`.
+
+### Reports, the slow path
+
+A report is minutes of throttled retrieval when a category is cold and about
+half a second when it is warm, so it is a job rather than a request.
+
+| | |
+|---|---|
+| `POST /v1/reports` | Start one. Returns `202` with an id immediately. Identical subjects already in flight are **coalesced** onto one run, and the response says whether yours was. |
+| `GET /v1/reports/:id` | Poll it. Carries `findings`, `weakSignals` and `rejected`, and honours `Retry-After` while running. |
+| `GET /v1/reports/:id/stream` | The same run as server sent events, so a caller sees each stage rather than a spinner. |
+
+### Evidence, the fast path
+
+Every number a report prints resolves here. This is the half that makes a claim
+checkable, and it answers in single digit milliseconds against a warm corpus.
+
+| | |
+|---|---|
+| `GET /v1/evidence/:receiptId` | One record: the text somebody wrote, its score, channel, permalink and timestamp. |
+| `POST /v1/evidence/batch` | Up to 200 at once, because a report cites more than one. |
+| `POST /v1/evidence/search` | Full text search across the retained corpus, filterable by category. |
+| `GET /v1/evidence/ads/:adId` | Every observation of one ad, which is how a run duration becomes a fact rather than an estimate. |
+| `GET /v1/categories/:slug` | How warm a category is: records held, channels, age. Free, and worth checking before paying for a cold report. |
+
+### Verification
+
+| | |
+|---|---|
+| `POST /v1/verify` | Hand it claims with receipt ids and it re-resolves every one against the corpus. **It will verify our own output or anybody else's.** |
+| `GET /v1/healthz` | Liveness. Touches no database. |
+
+`POST /v1/verify` is the endpoint that makes the rest falsifiable. If a claim
+cites a record that does not exist, this says so, and it says so about our
+reports exactly as readily as about a competitor's.
+
+## Why this is different
+
+Three properties, none of which is a matter of opinion.
+
+**A receipt does not rot.** Every other research API returns a URL captured
+against a live index at query time, and it dies when the page does. A receipt
+is a stable id into a retained corpus. It resolves identically forever,
+including after the source deletes the original.
+
+**Corroboration is arithmetic.** A claim needs at least three independent
+records before it prints as a finding, and the count travels with it. "31
+records across 5 channels" is a sentence no search API can produce, because
+none of them keep a corpus to count against. It is also the prompt injection
+defence: a planted comment cannot corroborate itself.
+
+**The archive can be asked about the past.** Because records are kept rather
+than fetched, the corpus answers questions a live index structurally cannot:
+
+- **Trend**, as share of conversation over time, not raw counts. Counting
+  records per month reports everything as rising, because it measures our
+  harvesting rather than the market.
+- **As of**, answering what the market said in March, filtered on when each
+  record was written rather than when we found it. The archive is allowed to
+  know more about March than we did in March.
+- **Diff**, what changed since the last report for the same subject, naming the
+  new receipts rather than counting them.
+- **Comparison**, one full retrieval per rival, because counting records in one
+  corpus that mention a competitor measures co-occurrence and attributes
+  nothing.
+- **Attested evidence**, records a named party filed with a regulator, which
+  outranks any forum comment and which no listening tool holds.
+
+And the thing that is easy to miss: **Meta does not archive inactive commercial
+ads.** Once a campaign stops, the record that it ran for 94 days is gone and no
+amount of money brings it back. Shopify drops delisted products from
+`/products.json` the day they are pulled. For those sources the corpus is not a
+cache, it is the only copy that will ever exist, and only because something was
+recording on the day.
+
 
 ## How it is licensed
 
