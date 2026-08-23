@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Dependencies are the only step allowed to touch the network.
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # The whole point of the fixture strategy is that the suite needs no keys
+      # and no network. Asserting that in a README is worthless, because an
+      # adapter that quietly hits the wire passes CI and then flakes forever.
+      #
+      # `unshare -n` runs the tests in a fresh network namespace with no route
+      # off the host, so a real request fails immediately and loudly. It
+      # isolates only the test process, which is why the job can still report
+      # its own result. Loopback is brought up because node expects it.
+      #
+      # Env is deliberately empty: no keys are set anywhere in this workflow.
+      - name: Test, offline and keyless
+        run: sudo unshare -n -- bash -c "ip link set lo up && npm test"
+
+      - name: Copy style
+        run: npm run lint:copy
+
+      - name: Security
+        run: npm run check:security
+
+      # The drift CONTRACTS against the stored fixtures. No network, so it
+      # belongs on every commit: it catches the contracts drifting away from
+      # the parsers they describe, which would make the weekly live run
+      # impossible to interpret. The live half runs in drift.yml.
+      - name: Drift contracts match the fixtures
+        run: npm run check:drift:fixtures

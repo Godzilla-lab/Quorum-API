@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?><!--
+About this XML document
+This XML document provides a list of all weekly reports published on the Safety Gate portal from 2005 to the present. A new weekly report is published every Friday.
+Each report contains a collection of product safety alerts issued during the respective week.
+The information provided in each alert includes:
+1. Product identification details (e.g. brand, model, barcode, photos, detailed product description
+2. The type of risk or hazard associated with the product
+3. Measures taken by companies or market surveillance authorities
+4. The applicable legal basis for the action taken
+To access the full content of a specific weekly report, copy the corresponding URL from the list and paste it into your browser.
+Please note: Some fields within the reports are optional. Where information is missing, you may see 'xsi:nil="true"' indicating that the field was not completed.
+--><Safety-Gate>   <weeklyReport><report_language>en</report_language><reference>Report-2026-33</reference><publicationDate>21/08/2026</publicationDate><year>2026</year><month>8</month><day>21</day><week>33</week><URL>https://ec.europa.eu/safety-gate-alerts/api/download/weeklyReport/detail/xml/10000319?language=en&amp;search=WEB_REPORT%7C:%7C10000319,</URL></weeklyReport><weeklyReport><report_language>en</report_language><reference>Report-2026-32</reference><publicationDate>14/08/2026</publicationDate><year>2026</year><month>8</month><day>14</day><week>32</week><URL>https://ec.europa.eu/safety-gate-alerts/api/download/weeklyReport/detail/xml/10000318?language=en&amp;search=WEB_REPORT%7C:%7C10000318,</URL></weeklyReport><weeklyReport><report_language>en</report_language><reference>Report-2026-31</reference><publicationDate>07/08/2026</publicationDate><year>2026</year><month>8</month><day>7</day><week>31</week><URL>https://ec.europa.eu/safety-gate-alerts/api/download/weeklyReport/detail/xml/10000317?language=en&amp;search=WEB_REPORT%7C:%7C10000317,</URL></weeklyReport><weeklyReport><report_language>en</report_language><reference>Report-2026-30</reference><publicationDate>31/07/2026</publicationDate><year>2026</year><month>7</month><day>31</day><week>30</week><URL>https://ec.europa.eu/safety-gate-alerts/api/download/weeklyReport/detail/xml/10000316?language=en&amp;search=WEB_REPORT%7C:%7C10000316,</URL></weeklyReport></Safety_Gate_Weekly_Reports>

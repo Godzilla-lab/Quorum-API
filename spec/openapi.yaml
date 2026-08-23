@@ -1,0 +1,1602 @@
+openapi: 3.1.0
+
+info:
+  title: Receipts API
+  version: 0.1.0
+  summary: Market evidence where every claim resolves to a real record.
+  description: |
+    Receipts turns a subject into corroborated market evidence. Every claim
+    carries receipt ids, and every receipt id is fetchable, so a customer of our
+    customer can click a claim and read the human who said it.
+
+    ## The four properties this contract exists to guarantee
+
+    1. **No receipt, no claim.** A claim below the corroboration threshold is
+       never returned in `findings`. It is returned in `weakSignals`, a separate
+       array, so a consumer cannot print it as a market statement by forgetting
+       an `if`. The two arrays are disjoint and that is enforced server side.
+    2. **Every receipt id resolves, forever.** A receipt id is
+       `sha256(source, externalId)` truncated to 16 hex characters. It is
+       content addressed, so the same record has the same id on every machine,
+       in both storage drivers, with no allocation table. `GET /v1/evidence/{id}`
+       on a well formed id that names nothing returns 404 and never a guess.
+    3. **A quote resolves too.** Any text returned inside quotation marks under
+       a claim appears verbatim in one of the records cited by that claim. The
+       server checks this before responding, and `fabrication` reports that the
+       check ran rather than asking you to trust that it did.
+    4. **Degradation is reported, never hidden.** Vendor legs fail
+       independently. A report with no ads leg is still a good report. One that
+       looks complete while a leg crashed is the failure worth engineering
+       against, so every missing leg appears in `degraded` with its impact.
+
+    ## What this API will not do
+
+    It will not return a confidence score. An unfalsifiable number is exactly
+    what this product exists to refuse. Claims carry a receipt count, a channel
+    count, an evidence tier spread and the route that earned the finding, all of
+    which a reader can go and check.
+
+    It will not return a duration that nobody reported and nobody observed. An
+    ad with no evidenced dates returns `daysRunning: null`, not a guess.
+
+    ## Reading this at scale
+
+    A report is a job that takes minutes, not a request. Capacity is bounded by
+    politeness to upstream archives rather than by our servers: measured
+    2026-08-22, the shared throttle floor of 220ms sustains about 785 cold
+    reports per day across all callers combined, and that number does not
+    improve with more servers. Warm categories are the only structure in which
+    this scales at all, so the contract is built to make warm answers cheap and
+    duplicate cold work impossible. That ceiling is the same at a thousand
+    callers and at a million, because it is a property of the upstream archive
+    rather than of our traffic. See `docs/rate-limits.md`.
+
+    Three parts of this contract exist purely for concurrency, and skipping any
+    of them multiplies upstream load by caller count:
+
+    - `POST /v1/reports` **coalesces**. Two callers asking for the same category
+      while a run is in flight join that run rather than starting a second one.
+    - `Idempotency-Key` makes a retry free. A client that times out and retries
+      must not start a second minutes long job.
+    - Evidence responses are **immutable and cacheable**. A receipt id names one
+      unchanging record, so a resolved receipt carries a strong ETag and a long
+      `Cache-Control`, and a popular receipt should be served from a cache
+      however many times it is asked for, rather than reaching the database
+      once per caller.
+
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: Receipts
+    url: https://github.com/receipts
+
+servers:
+  - url: https://api.receipts.dev/v1
+    description: Hosted
+  - url: http://localhost:8787/v1
+    description: Local, npm run dev -w packages/server
+
+security:
+  - apiKey: []
+
+tags:
+  - name: reports
+    description: Research jobs. Minutes long, queued, cancellable, resumable.
+  - name: evidence
+    description: The resolver. This is the endpoint the whole product rests on.
+  - name: categories
+    description: Corpus warmth, so a caller can tell cheap from expensive first.
+  - name: usage
+    description: Spend and quota for the calling key.
+
+paths:
+  /reports:
+    post:
+      operationId: createReport
+      tags: [reports]
+      summary: Start a report, or join one already running
+      description: |
+        Starts a research job and returns immediately. Poll `GET /reports/{id}`
+        or subscribe to `GET /reports/{id}/stream`.
+
+        **This endpoint coalesces, and that is load bearing rather than an
+        optimisation.** A cold report costs about 500 throttled upstream
+        requests. If a run for the same resolved category is already in flight,
+        this returns that run with `coalesced: true` and a `202`, rather than
+        starting a second one. Two callers researching the same popular product
+        at the same time therefore cost one run, not two.
+
+        **Coalescing shares the retrieval and never shares the claims.** This is
+        what makes it safe to join a run somebody else started. Retrieval writes
+        into a corpus that is global, so its cost is genuinely shared. Claims
+        are then computed per caller by searching that corpus for that caller's
+        own `terms`, so joining a run does not mean inheriting the questions
+        somebody else asked.
+
+        The one thing a joiner cannot change is where the run looked upstream.
+        A run that has already planned its queries will not add new ones
+        mid flight, so a term nobody asked for before you joined is answered
+        from the corpus as it stands rather than from a fresh search. Those
+        terms come back in `termsDeferred`, and asking again once the run has
+        finished will search them properly. Silently returning a thin answer for
+        them would be the dishonest option, and silently starting a second full
+        run would defeat the purpose.
+
+        Send an `Idempotency-Key` when a retry is possible, which is always.
+        The same key replayed within 24 hours returns the original report rather
+        than starting another job.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportRequest' }
+      responses:
+        '202':
+          description: |
+            Accepted. Check `coalesced` to see whether this started a new run or
+            joined an existing one. A replayed `Idempotency-Key` also lands here.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+              description: Where to poll for this report.
+            RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+            RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+            RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportAccepted' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '402': { $ref: '#/components/responses/SpendCapReached' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/QueueSaturated' }
+
+  /reports/{id}:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      operationId: getReport
+      tags: [reports]
+      summary: Poll or fetch a report
+      description: |
+        A running report returns what has landed so far, so a caller polling can
+        show progress rather than a spinner. `findings` on a running report is
+        provisional and may grow. It never shrinks: a claim that reached the
+        threshold cannot fall below it as more evidence arrives.
+      responses:
+        '200':
+          description: The report, complete or in progress.
+          headers:
+            Retry-After:
+              schema: { type: integer, minimum: 1 }
+              description: |
+                Present while `status` is `queued` or `running`. How long to wait
+                before polling again. Honour it: past a few hundred concurrent
+                callers, tight polling is a self inflicted denial of service.
+            ETag: { $ref: '#/components/headers/ETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '304': { description: Not modified, the report has not advanced. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    delete:
+      operationId: cancelReport
+      tags: [reports]
+      summary: Cancel a running report
+      description: |
+        Cancellation is checked between queries rather than only at the start,
+        because a cancelled report has to stop spending and on a metered source
+        that is money. Records already retrieved stay in the corpus: a run that
+        dies at minute forty still leaves the archive better than it found it.
+
+        Cancelling a coalesced report detaches this caller from the shared run.
+        The run itself continues while any other subscriber remains attached.
+      responses:
+        '200':
+          description: Cancelled, or already finished.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /reports/{id}/stream:
+    parameters:
+      - $ref: '#/components/parameters/ReportId'
+    get:
+      operationId: streamReport
+      tags: [reports]
+      summary: Server sent events for a running report
+      description: |
+        Measured on the engine, a warm run is 82s of which 68s is one synthesis
+        call. Streaming makes time to first insight a few seconds while time to
+        complete stays what it is.
+
+        Events, all with an `id` so a dropped connection can resume:
+
+        - `stage`     a pipeline stage started or finished
+        - `finding`   a claim cleared the corroboration threshold
+        - `degraded`  a source produced nothing, with its impact
+        - `done`      terminal, carries the full report
+        - `error`     terminal, carries an Error object
+
+        Send `Last-Event-ID` to resume. The server replays from that event
+        rather than restarting the report, so a flaky client costs nothing
+        upstream. Streams are capped per key like every other resource: a
+        subscription is cheap but not free, and an abandoned open stream is
+        closed after the idle timeout in `docs/rate-limits.md`.
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: { type: string }
+          description: Resume after this event id instead of from the beginning.
+      responses:
+        '200':
+          description: An event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /evidence/{receiptId}:
+    parameters:
+      - $ref: '#/components/parameters/ReceiptIdPath'
+    get:
+      operationId: getEvidence
+      tags: [evidence]
+      summary: Resolve one receipt id to the real record
+      description: |
+        The anti fabrication endpoint. Given an id cited under a claim, returns
+        the actual record: its text, its score, its channel, its timestamp and
+        its permalink.
+
+        **A well formed id that names nothing returns 404.** It never returns a
+        nearest match, and it never returns a synthesised record. That is the
+        entire property being sold, so the failure is loud.
+
+        A malformed id returns 400 rather than 404, because those are different
+        answers: one says you asked wrongly, the other says this evidence does
+        not exist.
+
+        The response is immutable. A receipt id is derived from the record's own
+        content, so the record behind it never changes, and this response is
+        safe to cache for a year. Please do, because the corpus at twenty
+        thousand callers is a shared resource.
+      responses:
+        '200':
+          description: The record.
+          headers:
+            ETag: { $ref: '#/components/headers/ETag' }
+            Cache-Control:
+              schema: { type: string }
+              description: 'public, max-age=31536000, immutable'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceRecord' }
+        '304': { description: Not modified. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404':
+          description: |
+            No record carries this id. This is a real answer and the one that
+            proves a citation was fabricated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '410': { $ref: '#/components/responses/Tombstoned' }
+
+  /evidence/batch:
+    post:
+      operationId: getEvidenceBatch
+      tags: [evidence]
+      summary: Resolve many receipt ids in one request
+      description: |
+        An agent verifying a report checks every id it was given. Doing that one
+        request at a time turns one report into fifty round trips, which is why
+        this exists and why the MCP server uses it.
+
+        Unknown ids are returned in `unresolved` rather than causing an error,
+        because the caller asked a question and "this one does not exist" is the
+        answer, not a failure.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvidenceBatchRequest' }
+      responses:
+        '200':
+          description: Whatever resolved, plus what did not.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceBatchResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /evidence/ads/{adId}:
+    parameters:
+      - name: adId
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 128 }
+    get:
+      operationId: getAdEvidence
+      tags: [evidence]
+      summary: Every recorded sighting of one ad
+      description: |
+        Ad observations are append only, so this returns the full history rather
+        than a current state, oldest first. Two sightings thirty days apart are
+        the evidence that an ad ran for thirty days.
+
+        **This is the evidence nobody else can produce.** The network does not
+        archive inactive commercial ads, so once a campaign stops, the record
+        that it ran for 94 days is destroyed at source and cannot be
+        reconstructed at any price. Every row here exists only because someone
+        was recording on the day.
+
+        The derived duration is returned alongside the raw sightings, with the
+        basis that produced it, so a caller can see whether a number was
+        reported by the network, computed from a start date, or observed by us.
+      responses:
+        '200':
+          description: The observation history and what it implies.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdEvidence' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /verify:
+    post:
+      operationId: verifyClaims
+      tags: [evidence]
+      summary: Check somebody's claims against the corpus
+      description: |
+        **This endpoint takes output this API did not produce.**
+
+        Every research API returns text with citations attached and a calling
+        agent has no way to check any of it. A fabricated citation looks exactly
+        like a real one, survives review, and is discovered by a customer
+        clicking a link that goes nowhere.
+
+        Send claims with the ids they cite. Three questions come back, and all
+        three are answered with facts rather than judgement:
+
+        - Does every cited id resolve to a real record?
+        - Does every quoted sentence appear in one of the records it cites?
+        - Does the claim still clear the corroboration bar once the ids that
+          resolve to nothing have been removed?
+
+        That last one is the property that matters. Corroboration is recomputed
+        over the survivors, so **a fabricated id cannot contribute to a count
+        under any circumstances**. A claim that only reached the threshold with
+        invented ids is returned demoted, and the invented ids are named.
+
+        A model can also cite a perfectly real record and still put words in
+        that person's mouth, so quotes are checked separately. Whitespace and
+        case are normalised, because a model reflows a quote constantly and that
+        is not fabrication. Changing a word is.
+
+        The same check runs as `receipts verify <file.json>` in the CLI, which
+        exits non zero when anything was invented so it can run in a pipeline.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyRequest' }
+      responses:
+        '200':
+          description: |
+            The verdict per claim, plus a count of what was invented. A response
+            with `clean: false` is a successful request: the check ran and found
+            something.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /evidence/search:
+    post:
+      operationId: searchEvidence
+      tags: [evidence]
+      summary: Query the corpus directly, with no synthesis
+      description: |
+        Ranked full text retrieval over records already held. No model runs, no
+        upstream is contacted, and nothing is charged. This is the call that
+        replaces about 500 throttled HTTP requests on a warm category: measured
+        2026-08-22, 0.5s against 596s cold.
+
+        Results are records, not claims. Nothing here has been corroborated, so
+        nothing here may be printed as a market statement. Use `corroboration`
+        on a report for that.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EvidenceSearchRequest' }
+      responses:
+        '200':
+          description: Matching records, best first.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvidenceSearchResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /categories/{slug}:
+    parameters:
+      - name: slug
+        in: path
+        required: true
+        schema: { type: string, minLength: 1, maxLength: 200 }
+        description: The category, as a report resolved it.
+    get:
+      operationId: getCategory
+      tags: [categories]
+      summary: Corpus warmth and coverage for a category
+      description: |
+        Ask this before spending. A warm category answers in about 0.1s with
+        zero upstream requests. A cold one costs about 500 throttled requests
+        and around 40s, and those requests come out of a daily budget shared by
+        every caller on the platform.
+
+        Warm means both conditions at once: at least 150 records held, and the
+        last harvest less than 14 days ago. Both thresholds are exported from
+        one module and imported by both storage drivers, because two drivers
+        that must agree about warmth cannot agree by convention.
+      responses:
+        '200':
+          description: Coverage for this category.
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              description: 'public, max-age=60. Warmth moves slowly.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoryStats' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /usage:
+    get:
+      operationId: getUsage
+      tags: [usage]
+      summary: Spend and quota for the calling key
+      description: |
+        Two quotas are reported separately because they protect against
+        different things. A report is a minutes long job and a denial of service
+        vector. An evidence lookup is one indexed read. A single shared limit
+        either starves lookups or leaves jobs unprotected.
+
+        `concurrentReports` is a separate ceiling again, because request rate
+        does not bound work already running.
+      responses:
+        '200':
+          description: Current period usage.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer rk_<32 hex>`. The server stores only a sha256 of
+        the key with a short display prefix, compares in constant time, and
+        never logs a whole key. A leaked log line must not be a leaked key.
+
+  parameters:
+    ReportId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^rep_[0-9a-f]{16}$' }
+    ReceiptIdPath:
+      name: receiptId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ReceiptId' }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, minLength: 8, maxLength: 255 }
+      description: |
+        Replaying this key within 24 hours returns the original report instead
+        of starting a second job. Reusing a key with a different request body is
+        a 409, because silently ignoring the new body would answer a question
+        nobody asked.
+
+  headers:
+    ETag:
+      schema: { type: string }
+      description: Strong validator. Send it back as `If-None-Match`.
+    RateLimitLimit:
+      schema: { type: integer }
+      description: Requests permitted in the current window for this quota.
+    RateLimitRemaining:
+      schema: { type: integer }
+      description: Requests left in the current window.
+    RateLimitReset:
+      schema: { type: integer }
+      description: Seconds until the window resets.
+    RetryAfter:
+      schema: { type: integer, minimum: 1 }
+      description: Seconds to wait before retrying. Always present on 429 and 503.
+
+  responses:
+    BadRequest:
+      description: The request was malformed.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: Missing or invalid key.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: No such resource.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Tombstoned:
+      description: |
+        This record was removed at source or on request, and the id is retained
+        as a tombstone. A claim citing it can therefore still be audited: the
+        answer is "this existed and was withdrawn", which is different from
+        "this never existed" and must not be collapsed into a 404.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    IdempotencyConflict:
+      description: This idempotency key was already used with a different body.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    SpendCapReached:
+      description: |
+        The spend cap for this key, or the global cap, is reached. Enforced in
+        the cost meter rather than in the route, because a route guard cannot
+        stop a job that is already inside a retry loop burning vendor credit.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    RateLimited:
+      description: Too many requests for this quota.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+        RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+        RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+        RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    QueueSaturated:
+      description: |
+        The job queue is full. This is a deliberate answer rather than a
+        timeout: upstream capacity is about 785 cold reports per day across all
+        callers combined, measured 2026-08-22, and pretending otherwise would
+        just move the failure somewhere less honest.
+
+        `GET /categories/{slug}` first. A warm category is not subject to this,
+        because it costs no upstream requests at all.
+      headers:
+        Retry-After: { $ref: '#/components/headers/RetryAfter' }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [type, message, requestId]
+          properties:
+            type:
+              type: string
+              enum: [invalid_request, unauthorized, not_found, gone, conflict, rate_limited, spend_cap_reached, queue_saturated, internal]
+            message:
+              type: string
+              description: |
+                Safe to show a customer. Carries no key material and no absolute
+                filesystem path, both of which have ended up in customer facing
+                responses in products that did not check.
+            requestId: { type: string }
+            retryAfterSeconds: { type: [integer, 'null'] }
+
+    ReceiptId:
+      type: string
+      pattern: '^rc_[0-9a-f]{16}$'
+      examples: ['rc_8f2a1c4d90b7e365']
+      description: |
+        `rc_` plus the first 16 hex characters of
+        `sha256(source || 0x00 || externalId)`.
+
+        Sixteen and not five. A collision means two different people's words
+        share one id, so resolving a claim returns the wrong human, which is the
+        worst failure this product can produce. Birthday bound computed
+        2026-08-22: 5 hex collides with near certainty before the corpus is
+        interesting, 10 hex fails at a million records, 16 hex holds to a
+        hundred million with room to spare.
+
+        Category is deliberately not in the hash. One comment harvested under
+        two categories is two rows, and if the id carried the category, one
+        human utterance would carry two ids and corroboration would count that
+        person twice.
+
+    SourceId:
+      type: string
+      description: |
+        Where a record came from. Every source is assigned an evidence tier at
+        compile time, so adding a source without deciding what its evidence is
+        worth fails the build rather than defaulting quietly.
+      enum: [sec-edgar, cpsc, nhtsa, openfda, eu-safety-gate, ad, shopify, woocommerce, wayback, commoncrawl, npm, github, reddit, hackernews, discourse, stackexchange, lobsters, steam, appstore, youtube, review, wikipedia, gdelt, openalex, producthunt, jobs]
+
+    EvidenceTier:
+      type: string
+      description: |
+        Weighted by independence, never by importance, and it never collapses
+        into a score.
+
+        - `A` attested: a named party stated this on the record, with
+          consequences for lying. A regulator holds it.
+        - `B` transactional: an observable state rather than an opinion. A
+          price, a catalogue entry, an ad that ran.
+        - `C` voice: what people said. Individually light, and the volume is the
+          entire point.
+        - `D` context: sets the scene and promotes nothing on its own.
+      enum: [A, B, C, D]
+
+    EvidenceRecord:
+      type: object
+      required: [receiptId, source, tier, kind, externalId, category, channel, text, score, url, createdUtc, harvestedAt]
+      properties:
+        receiptId: { $ref: '#/components/schemas/ReceiptId' }
+        source: { $ref: '#/components/schemas/SourceId' }
+        tier: { $ref: '#/components/schemas/EvidenceTier' }
+        kind:
+          type: string
+          enum: [post, comment]
+        externalId:
+          type: string
+          description: The id this record carries at its source.
+        category: { type: string }
+        channel:
+          type: string
+          description: |
+            A distinct place inside one source: a subreddit, a story thread. Two
+            records in different channels are more independent than two in the
+            same one, which is why the count is reported alongside the record
+            count.
+        text: { type: string }
+        score:
+          type: integer
+          description: The source's own score, carried unaltered.
+        url:
+          type: string
+          description: Permalink to the record at its source. Go and read it.
+        createdUtc:
+          type: integer
+          description: Unix seconds, as reported by the source.
+        harvestedAt:
+          type: integer
+          description: Unix seconds when this entered the corpus.
+
+    SourceSpread:
+      type: object
+      required: [source, records, channels]
+      properties:
+        source: { $ref: '#/components/schemas/SourceId' }
+        records: { type: integer }
+        channels: { type: integer }
+
+    Corroboration:
+      type: object
+      description: |
+        The number the whole product rests on, computed once in one place. A
+        renderer that counts for itself is a renderer that can disagree with the
+        API, and the CLI and the hosted server must print the same figure for
+        the same evidence.
+
+        Counting dedupes by receipt id. Counting rows instead would count one
+        human twice, because the same comment harvested under two categories is
+        two rows.
+
+        Stated rather than glossed: records carry no author, so three comments
+        by one person count as three. The channel spread is reported so a reader
+        can see how concentrated the evidence is.
+      required: [term, receiptIds, records, channels, sources, tiers, basis, verdict, threshold]
+      properties:
+        term:
+          type: string
+          description: 'What was asked about: sizing, durability.'
+        receiptIds:
+          type: array
+          items: { $ref: '#/components/schemas/ReceiptId' }
+          description: |
+            Every distinct receipt behind this claim. A claim that cannot list
+            these does not ship.
+        records: { type: integer }
+        channels: { type: integer }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/SourceSpread' }
+        tiers:
+          type: object
+          description: Distinct receipts per evidence tier.
+          required: [A, B, C, D]
+          properties:
+            A: { type: integer }
+            B: { type: integer }
+            C: { type: integer }
+            D: { type: integer }
+        basis:
+          type: string
+          description: |
+            Which route earned the finding, so a report shows its working rather
+            than asserting a verdict.
+
+            - `receipt-count` the threshold in distinct promoting receipts
+            - `cross-tier` two or more promoting tiers, at least one attested or
+              transactional
+            - `attested` two attested receipts, even from the same tier
+            - `none` nothing was earned, so this is a weak signal
+
+            The third route exists because the second got a real case wrong: a
+            recall notice and a vehicle complaint are both tier A, cross no
+            tier, and calling two independent government records a weak signal
+            is simply incorrect. The threshold of three was calibrated for forum
+            comments and was never calibrated for filings.
+          enum: [receipt-count, cross-tier, attested, none]
+        verdict:
+          type: string
+          description: |
+            `finding` may be printed as a statement about the market.
+            `weak-signal` may not, ever, no matter how good the quotes are.
+          enum: [finding, weak-signal]
+        threshold:
+          type: integer
+          description: The threshold actually applied, so it can be checked.
+
+    Claim:
+      type: object
+      description: |
+        A corroborated claim as returned in a report, after every cited id was
+        fetched back out of the corpus.
+      required: [text, term, corroboration, receipts, fabricated, unsupportedQuotes, verdict]
+      properties:
+        text:
+          type: string
+          description: |
+            The claim in words. Any quoted span in here appears verbatim in one
+            of the cited records, because a model can cite a real record and
+            still put words in that person's mouth.
+        term: { type: string }
+        corroboration: { $ref: '#/components/schemas/Corroboration' }
+        receipts:
+          type: array
+          items: { $ref: '#/components/schemas/ReceiptId' }
+          description: |
+            Only ids that genuinely resolved. Fetch any of them from
+            `/evidence/{receiptId}` and check for yourself.
+        fabricated:
+          type: array
+          items: { type: string }
+          description: |
+            Ids the model cited that resolve to nothing. Dropped from the count,
+            not tidied away, and reported here so the fabrication is visible.
+
+            Dropping rather than rejecting the whole claim is not the soft
+            option, because corroboration is recomputed over the survivors. A
+            claim that only reached the threshold with the help of invented ids
+            falls below it and is demoted to a weak signal.
+        unsupportedQuotes:
+          type: array
+          items: { type: string }
+          description: |
+            Quoted spans that appear in none of the cited records. A claim with
+            any of these is rejected outright whatever its corroboration, and
+            never appears in `findings`.
+        verdict:
+          type: string
+          enum: [finding, weak-signal, rejected]
+
+    FabricationReport:
+      type: object
+      description: |
+        What the model tried to get away with, counted. Carried on every report
+        so a customer can see the check ran rather than trusting that it did.
+      required: [claimsChecked, idsCited, idsFabricated, quotesChecked, quotesUnsupported, claimsRejected, clean]
+      properties:
+        claimsChecked: { type: integer }
+        idsCited: { type: integer }
+        idsFabricated: { type: integer }
+        quotesChecked: { type: integer }
+        quotesUnsupported: { type: integer }
+        claimsRejected: { type: integer }
+        clean:
+          type: boolean
+          description: True when the model invented nothing at all.
+
+    Sufficiency:
+      type: object
+      description: |
+        Not enough evidence is an answer, and it is a first class one.
+
+        A blank table cannot tell a reader whether nobody discusses this
+        product, or we looked in the wrong place, or we found plenty and threw
+        it all away. Those are entirely different situations and only one of
+        them is the market's fault.
+      required: [verdict, reason, suggestions, seen, rejected, stored, findings]
+      properties:
+        verdict:
+          type: string
+          description: |
+            - `sufficient` at least one question was answerable
+            - `thin` records exist, nothing reached the threshold
+            - `insufficient` nothing usable was found at all
+          enum: [sufficient, thin, insufficient]
+        reason:
+          type: string
+          description: One sentence a reader can act on.
+        suggestions:
+          type: array
+          items: { type: string }
+          description: |
+            What would actually change the outcome, concretely. Telling someone
+            to narrow their subject when the real problem is that we found
+            nowhere to look wastes their time, so the two cases give opposite
+            advice.
+        seen: { type: integer }
+        rejected:
+          type: integer
+          description: |
+            Records found and gated out as off topic. A high number here is the
+            gate working, not the run failing: everything stored is trusted by
+            every later run, so an off topic record is permanent corpus poison.
+        stored: { type: integer }
+        findings: { type: integer }
+
+    SourceOutcome:
+      type: object
+      required: [sourceId, status, queriesPlanned, queriesRun, recordsSeen, recordsGated, recordsWritten, elapsedMs]
+      properties:
+        sourceId: { type: string }
+        status:
+          type: string
+          enum: [ok, skipped, degraded]
+        reason:
+          type: string
+          description: Why, in words a caller can show a customer.
+        queriesPlanned: { type: integer }
+        queriesRun: { type: integer }
+        recordsSeen: { type: integer }
+        recordsGated: { type: integer }
+        recordsWritten: { type: integer }
+        elapsedMs: { type: integer }
+
+    Degradation:
+      type: object
+      description: |
+        A leg that produced nothing, and what the report is missing as a result.
+        A source that fails loudly and one that quietly returns nothing both
+        land here, because a report that looks complete while a leg crashed is
+        the failure worth engineering against.
+      required: [source, reason, impact]
+      properties:
+        source: { type: string }
+        reason:
+          type: string
+          enum: [not_configured, plan_failed, no_queries, all_off_topic, retrieve_failed, empty, not_reached]
+        impact:
+          type: string
+          description: 'What is missing, in plain words: no ads evidence in this report.'
+        # not_reached means the run stopped before this source executed, because a
+        # deadline, a cancellation or a record cap ended retrieval first. It is
+        # reported rather than omitted: a source that silently vanishes from the
+        # response is a hole the caller cannot see.
+
+    Retrieval:
+      type: object
+      required: [outcomes, totalSeen, totalWritten, elapsedMs, stoppedEarly]
+      properties:
+        outcomes:
+          type: array
+          items: { $ref: '#/components/schemas/SourceOutcome' }
+        totalSeen: { type: integer }
+        totalWritten: { type: integer }
+        elapsedMs: { type: integer }
+        stoppedEarly:
+          description: |
+            Why retrieval ended before exhausting its plan, or null if it did
+            not. Everything is bounded, because an unbounded loop over a
+            paginating upstream is how a thirty minute run becomes a six hour
+            one.
+          oneOf:
+            - type: 'null'
+            - type: string
+              enum: [deadline, cancelled, record-cap]
+
+    Share:
+      type: object
+      required: [video, static, total, videoShare]
+      properties:
+        video: { type: integer }
+        static: { type: integer }
+        total: { type: integer }
+        videoShare:
+          type: [number, 'null']
+          description: Null when nothing was typed, never zero standing in for unknown.
+
+    FormatVerdict:
+      type: object
+      description: |
+        Video against static, decided from what actually ran rather than from
+        the network's own format label. A card that cannot be typed returns null
+        and leaves the sample rather than joining a bucket, because a ratio
+        computed over guesses is worse than no ratio.
+
+        Measured 2026-08-22 on a live capture of 30 ads, the network's
+        `display_format` field could not type 17 of them.
+      required: [network, sample, raw, longRunners, durationWeighted, byPlatform, verdict, confidence, reason, cohortAdIds]
+      properties:
+        network: { type: string }
+        sample:
+          type: object
+          required: [ads, typed, untyped, dated, past60, past90]
+          properties:
+            ads: { type: integer }
+            typed: { type: integer }
+            untyped: { type: integer }
+            dated: { type: integer }
+            past60: { type: integer }
+            past90: { type: integer }
+        raw: { $ref: '#/components/schemas/Share' }
+        longRunners:
+          allOf:
+            - $ref: '#/components/schemas/Share'
+            - type: object
+              properties:
+                cohortDays: { type: integer }
+        durationWeighted:
+          type: object
+          required: [videoDays, staticDays, videoShare]
+          properties:
+            videoDays: { type: number }
+            staticDays: { type: number }
+            videoShare: { type: [number, 'null'] }
+        byPlatform:
+          type: object
+          additionalProperties: { $ref: '#/components/schemas/Share' }
+        verdict:
+          description: Null means we looked and there is not enough to call it, which is a real answer.
+          oneOf:
+            - type: 'null'
+            - type: string
+              enum: [video, static, both]
+        confidence:
+          oneOf:
+            - type: 'null'
+            - type: string
+              enum: [strong, moderate, thin]
+        reason: { type: string }
+        cohortAdIds:
+          type: array
+          items: { type: string }
+          description: |
+            The long runner ads this verdict actually rests on, so the claim can
+            be checked rather than believed. Resolve them through
+            `/v1/evidence/ads/{adId}`.
+
+            Added after an audit found the format verdict was one of only two
+            places in this API that stated a conclusion about a market with
+            nothing resolvable behind it. "Video wins, strong confidence" is
+            precisely the sentence that has to carry its evidence.
+
+    DurationBasis:
+      type: object
+      description: |
+        Where each ad's duration came from.
+
+        `observationSpan` is the count that exists only because we were
+        recording. The network does not archive inactive commercial ads, so once
+        a campaign stops, the record that it ran for 94 days is destroyed at
+        source and no amount of money brings it back. Nobody can reconstruct
+        that number later at any price.
+      required: [reported, startDate, observationSpan, none]
+      properties:
+        reported:
+          type: integer
+          description: |
+            A reported duration field, or a start plus a real end. An end only
+            counts once the ad has actually stopped: measured 2026-08-13, a live
+            ad reports today's date as its end date, which is a read timestamp.
+        startDate:
+          type: integer
+          description: Arithmetic on a real start date and a clock.
+        observationSpan:
+          type: integer
+          description: The span between our own first and last sighting.
+        none:
+          type: integer
+          description: No evidenced date. Shows no duration at all rather than a guess.
+
+    CategoryStats:
+      type: object
+      required: [category, docs, comments, channels, lastHarvested, ageDays, warm, subreddits, queries]
+      properties:
+        category: { type: string }
+        docs: { type: integer }
+        comments: { type: integer }
+        channels: { type: integer }
+        lastHarvested:
+          type: integer
+          description: Unix seconds. Zero when never harvested.
+        ageDays:
+          type: [number, 'null']
+          description: |
+            Null when never harvested. That is a real state and not an error: it
+            is what every category looks like before the first run.
+        warm:
+          type: boolean
+          description: |
+            At least 150 records and harvested less than 14 days ago. Both
+            conditions, because enough material and recent enough to trust are
+            two different questions.
+        subreddits:
+          type: array
+          items: { type: string }
+          description: The discovery plan that worked, remembered so a repeat run skips re-planning.
+        queries:
+          type: array
+          items: { type: string }
+
+    CostLine:
+      type: object
+      required: [key, kind, provider, calls, inputTokens, outputTokens, usd, verified]
+      properties:
+        key: { type: string }
+        kind:
+          type: string
+          enum: [call, llm]
+        provider:
+          type: [string, 'null']
+          description: |
+            Recorded because a row naming only the model cannot answer who
+            actually billed us for this.
+        calls: { type: integer }
+        inputTokens: { type: integer }
+        outputTokens: { type: integer }
+        usd: { type: number }
+        verified:
+          type: boolean
+          description: |
+            False means the rate was never confirmed with the vendor. Treat that
+            line as an estimate and never price anything from it. Measured
+            2026-08-22, one vendor rate in the table was wrong by 7.6x.
+
+    Cost:
+      type: object
+      description: |
+        Every paid call charges the meter, and every response carries its cost.
+        Money is accumulated in integer micro dollars rather than floats,
+        because 0.0058 times 10 is 0.057999999999999996 and a cap compared with
+        that never trips.
+      required: [totalUsd, lines, hasUnverified, overCap]
+      properties:
+        totalUsd: { type: number }
+        lines:
+          type: array
+          items: { $ref: '#/components/schemas/CostLine' }
+        hasUnverified: { type: boolean }
+        overCap: { type: boolean }
+
+    Subject:
+      type: object
+      description: |
+        What was researched, and how confidently we know what it is. A subject
+        is words, not necessarily a URL: a bare product name is a first class
+        input.
+      required: [category, title, source, images]
+      properties:
+        category:
+          type: string
+          description: What a buyer would call this. Drives every downstream query.
+        title: { type: string }
+        source:
+          type: string
+          description: |
+            - `text` plain words, nothing was found to attach to them
+            - `catalogue` a name matched a real product in a public catalogue
+            - `page` a URL was supplied and read
+            - `url-fallback` a URL was supplied and refused, so the slug was used
+          enum: [text, catalogue, page, url-fallback]
+        url: { type: string }
+        brand: { type: string }
+        price: { type: number }
+        currency:
+          type: string
+          description: |
+            Carried because a bare number reads as dollars wherever it came
+            from, and a price we cannot name the currency of has to say so.
+        description: { type: string }
+        ratingValue: { type: number }
+        ratingCount: { type: integer }
+        images:
+          type: array
+          items: { type: string }
+        note:
+          type: string
+          description: Present when a URL could not be read. Not an error.
+
+    SubjectHints:
+      type: object
+      description: |
+        What a model guessed this product is, when a bare name had to be
+        expanded.
+
+        **This is a search hint and never a claim.** It widens where we look and
+        it cannot widen what counts as evidence. If the model decides a wool
+        runner is a sock, sock records are still gated out against the subject
+        as typed. Hinted brands are verified against a real catalogue before
+        anything is believed, and a hallucinated one costs exactly one request.
+
+        Carried in the response rather than hidden, because a guess with no
+        author is not checkable.
+      required: [brands, category, aliases, model, derived]
+      properties:
+        brands:
+          type: array
+          items: { type: string }
+        category: { type: [string, 'null'] }
+        aliases:
+          type: array
+          items: { type: string }
+        model:
+          type: string
+          description: Which model guessed.
+        derived:
+          type: boolean
+          const: true
+          description: |
+            Always true, and it carries no receipt id, no source and no external
+            id. A model's reading is an interpretation, not a receipt, and the
+            type makes it impossible to cite one as evidence.
+
+    ReportRequest:
+      type: object
+      required: [subject]
+      properties:
+        subject:
+          type: string
+          minLength: 2
+          maxLength: 500
+          description: |
+            A product name or a URL. Both work. A URL additionally recovers
+            price, images and brand.
+        terms:
+          type: array
+          items: { type: string }
+          maxItems: 20
+          description: |
+            The questions to answer. These drive search and never the relevance
+            gate: gating on the terms used to find records is circular and
+            passes everything by construction.
+        communities:
+          type: array
+          items: { type: string }
+          maxItems: 20
+          description: Where to look, when the caller already knows.
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/SourceId' }
+          description: Defaults to every configured free source.
+        includeAds:
+          type: boolean
+          default: false
+          description: |
+            The metered leg. Runs last so that if a deadline or spend cap cuts
+            the run short, the free evidence is already gathered and written.
+        offline:
+          type: boolean
+          default: false
+          description: |
+            Answer from the corpus only. Zero upstream requests, zero cost, and
+            it never enters the job queue, so it is not subject to the cold
+            report ceiling.
+        capUsd:
+          type: number
+          minimum: 0
+          description: Hard ceiling for this report, enforced in the cost meter.
+        deadlineMs:
+          type: integer
+          minimum: 1000
+          description: Wall clock budget for retrieval.
+        webhookUrl:
+          type: string
+          format: uri
+          description: |
+            Called once on completion. Validated against the same rules as every
+            other URL this service touches: scheme allowlist, DNS resolved and
+            checked against private and reserved space before connecting, the
+            resolved address pinned for the connection, and every redirect hop
+            revalidated. A webhook into private address space is refused.
+
+    ReportAccepted:
+      type: object
+      required: [id, status, coalesced, category]
+      properties:
+        id: { type: string, pattern: '^rep_[0-9a-f]{16}$' }
+        status:
+          type: string
+          enum: [queued, running, complete, failed, cancelled]
+        coalesced:
+          type: boolean
+          description: |
+            True when this joined a run already in flight for the same category
+            rather than starting a new one. The corpus is global, so the second
+            caller gets the same evidence at no upstream cost.
+        category:
+          type: string
+          description: The resolved category this run is keyed on.
+        termsDeferred:
+          type: array
+          items: { type: string }
+          description: |
+            Terms this caller asked for that the in flight run is not searching
+            upstream, because it had already planned its queries before this
+            caller joined. Their claims are still computed, from the corpus as
+            it stands, and may therefore be thinner than the rest. Empty when
+            this started a new run, which is the normal case.
+        queuePosition: { type: [integer, 'null'] }
+        estimatedSeconds:
+          type: [integer, 'null']
+          description: |
+            From measured runs, not from a guess. Warm categories answered in
+            about 0.1s and a cold run in about 40s on 2026-08-22, but a cold run
+            queues behind the shared upstream budget and can wait much longer.
+
+    Report:
+      type: object
+      required: [id, status, subject, category, createdAt, findings, weakSignals, sufficiency, degraded, cost]
+      properties:
+        id: { type: string, pattern: '^rep_[0-9a-f]{16}$' }
+        status:
+          type: string
+          enum: [queued, running, complete, failed, cancelled]
+        subject: { $ref: '#/components/schemas/Subject' }
+        subjectCached:
+          type: boolean
+          description: True when the subject came from cache and no page was fetched.
+        hints:
+          description: Null when the subject resolved on its own.
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/SubjectHints'
+        brandsNamed:
+          type: array
+          description: |
+            Capitalised words the records repeat. A heuristic's output, NOT a
+            corroborated finding: a real run offered Google, American and China
+            as brands for running shoes. Each candidate carries the receipts it
+            was extracted from so a caller can see the misfire rather than take
+            our word for it.
+
+            Brands the market itself named, when we had to ask it. Guessing a
+            domain from a name only works when the brand is the first word, and
+            measured 2026-08-22 five bare names in a row found nothing. The
+            records we retrieve are full of people naming brands, so we ask the
+            corpus who makes this and verify the few names it offers.
+          items:
+            type: object
+            required: [name, records, channels, receiptIds]
+            properties:
+              name: { type: string }
+              records: { type: integer }
+              channels: { type: integer }
+              receiptIds:
+                type: array
+                items: { $ref: '#/components/schemas/ReceiptId' }
+                description: Records this word was extracted from. No receipt, no claim.
+        category: { type: string }
+        offline: { type: boolean }
+        createdAt: { type: integer }
+        completedAt: { type: [integer, 'null'] }
+        elapsedMs: { type: integer }
+        findings:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }
+          description: |
+            Claims that earned the right to be stated as facts about the market.
+            Every entry has `verdict: finding`.
+
+            Findings and weak signals are separate arrays rather than one array
+            with a flag, so a consumer cannot print a two record claim as a
+            market pattern by forgetting a filter. That is one missing `if` away
+            in every client that has ever been written against a flag.
+        weakSignals:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }
+          description: |
+            Real evidence, not enough of it. These must never be presented as
+            findings, however good the quotes are.
+        rejected:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }
+          description: |
+            Claims thrown out because they quoted something nobody said.
+            Returned rather than swallowed so the check is auditable.
+        fabrication: { $ref: '#/components/schemas/FabricationReport' }
+        sufficiency: { $ref: '#/components/schemas/Sufficiency' }
+        warmth: { $ref: '#/components/schemas/CategoryStats' }
+        retrieval:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/Retrieval'
+        formats:
+          description: |
+            Null when there were no ads to read. A verdict object with a null
+            `verdict` inside it means something different: we looked and there
+            is not enough evidence to call it.
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/FormatVerdict'
+        durationBasis: { $ref: '#/components/schemas/DurationBasis' }
+        degraded:
+          type: array
+          items: { $ref: '#/components/schemas/Degradation' }
+        cost: { $ref: '#/components/schemas/Cost' }
+        error:
+          description: Present only when status is failed.
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/Error'
+
+    EvidenceBatchRequest:
+      type: object
+      required: [receiptIds]
+      properties:
+        receiptIds:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items: { $ref: '#/components/schemas/ReceiptId' }
+
+    EvidenceBatchResponse:
+      type: object
+      required: [records, unresolved]
+      properties:
+        records:
+          type: array
+          items: { $ref: '#/components/schemas/EvidenceRecord' }
+        unresolved:
+          type: array
+          items: { type: string }
+          description: |
+            Ids that name nothing. Non empty against a report's own citations
+            means something fabricated them, which is exactly what a verifying
+            agent is looking for.
+        tombstoned:
+          type: array
+          items: { $ref: '#/components/schemas/ReceiptId' }
+          description: Ids that existed and were withdrawn. Different from unresolved.
+
+    AdObservation:
+      type: object
+      description: One sighting of one ad at one moment. Never updated, only added to.
+      required: [adId, advertiser, category, body, cta, url, creative, platforms, isActive, observedAt]
+      properties:
+        adId: { type: string }
+        advertiser: { type: string }
+        category: { type: string }
+        body: { type: string }
+        cta: { type: string }
+        url:
+          type: string
+          description: The ad in the network's own library, while it still exists there.
+        creative:
+          description: |
+            Null means we could not type it, and it is left out of every ratio
+            rather than bucketed. A ratio computed over guesses is worse than no
+            ratio: measured 2026-08-22 on a live capture, the network's own
+            format label could not type 17 of 30 ads.
+          oneOf:
+            - type: 'null'
+            - type: string
+              enum: [video, static]
+        platforms:
+          type: array
+          items: { type: string }
+        startDate: { type: [integer, 'null'] }
+        endDate:
+          type: [integer, 'null']
+          description: |
+            Only set once the ad has actually stopped. Measured 2026-08-13, a
+            live ad reports today's date as its end date, which is a read
+            timestamp and not an end date.
+        isActive: { type: boolean }
+        observedAt:
+          type: integer
+          description: Unix seconds when we saw it. The reason this row exists.
+
+    AdEvidence:
+      type: object
+      required: [adId, observations, daysRunning, durationConfidence, basis]
+      properties:
+        adId: { type: string }
+        observations:
+          type: array
+          items: { $ref: '#/components/schemas/AdObservation' }
+          description: Oldest first. The count is itself evidence of duration.
+        daysRunning:
+          type: [integer, 'null']
+          description: Null when no date was ever evidenced. Never a guess.
+        durationConfidence:
+          type: string
+          enum: [reported, observed, none]
+        basis:
+          type: string
+          description: |
+            Which route produced the number. `observation-span` is the one that
+            exists only because we were recording, and the one no competitor can
+            reproduce after a campaign ends.
+          enum: [reported, start-date, observation-span, none]
+
+    VerifyRequest:
+      type: object
+      required: [claims]
+      properties:
+        claims:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required: [receiptIds]
+            properties:
+              term:
+                type: string
+                description: What the claim is about. Optional, used only in the report.
+              text:
+                type: string
+                description: |
+                  The claim as written. Any quoted span in here is checked
+                  against the records it cites.
+              receiptIds:
+                type: array
+                items: { type: string }
+                description: |
+                  Deliberately typed as a plain string rather than a ReceiptId,
+                  because the point of this endpoint is to accept ids that may
+                  be malformed or invented. A well formed id that names nothing
+                  and a malformed id are both reported rather than rejected.
+
+    VerifyResponse:
+      type: object
+      required: [claims, fabrication, clean]
+      properties:
+        claims:
+          type: array
+          items:
+            type: object
+            required: [cited, resolved, fabricated, unsupportedQuotes, verdict, records, demoted]
+            properties:
+              term: { type: string }
+              text: { type: string }
+              cited: { type: integer }
+              resolved: { type: integer }
+              fabricated:
+                type: array
+                items: { type: string }
+                description: Ids that resolve to nothing, named rather than counted.
+              unsupportedQuotes:
+                type: array
+                items: { type: string }
+                description: Quoted spans appearing in none of the cited records.
+              verdict:
+                type: string
+                enum: [finding, weak-signal, rejected]
+              records:
+                type: integer
+                description: Distinct records that actually resolved. Never what was claimed.
+              demoted:
+                type: boolean
+                description: |
+                  True when the claim only cleared the corroboration bar with
+                  the help of ids that do not exist. This is the number worth
+                  alerting on.
+        fabrication: { $ref: '#/components/schemas/FabricationReport' }
+        clean:
+          type: boolean
+          description: Nothing invented and nothing misquoted.
+
+    EvidenceSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1, maxLength: 500 }
+        category: { type: [string, 'null'] }
+        source:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/SourceId'
+        minScore: { type: [integer, 'null'] }
+        limit: { type: integer, minimum: 1, maximum: 500, default: 50 }
+        cursor:
+          type: string
+          description: |
+            From the previous response. Responses are always bounded, because an
+            unbounded one is a denial of service vector against ourselves.
+
+    EvidenceSearchResponse:
+      type: object
+      required: [records, nextCursor]
+      properties:
+        records:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/EvidenceRecord'
+              - type: object
+                properties:
+                  rank:
+                    type: number
+                    description: Relevance rank, for ordering only. Not a confidence.
+        nextCursor: { type: [string, 'null'] }
+
+    Usage:
+      type: object
+      required: [keyPrefix, periodStart, periodEnd, reports, lookups, concurrentReports, spendUsd]
+      properties:
+        keyPrefix:
+          type: string
+          description: The display prefix only. The whole key is never returned or logged.
+        periodStart: { type: integer }
+        periodEnd: { type: integer }
+        reports:
+          $ref: '#/components/schemas/Quota'
+        lookups:
+          $ref: '#/components/schemas/Quota'
+        concurrentReports:
+          type: object
+          description: |
+            A separate ceiling from request rate, because rate limiting does not
+            bound work that is already running. Without this, one key can hold
+            the whole job queue with requests it made slowly.
+          required: [running, limit]
+          properties:
+            running: { type: integer }
+            limit: { type: integer }
+        spendUsd:
+          type: object
+          required: [used, cap]
+          properties:
+            used: { type: number }
+            cap: { type: [number, 'null'] }
+
+    Quota:
+      type: object
+      required: [used, limit, resetsAt]
+      properties:
+        used: { type: integer }
+        limit: { type: integer }
+        resetsAt: { type: integer }

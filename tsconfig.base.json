@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /*
+     * Node 22.22 strips types natively, so source runs directly with no build
+     * step. Stripping is not compiling: it erases annotations and cannot
+     * generate code, and it does NOT rewrite import specifiers. So an import
+     * must name the file that actually exists on disk, which is `./x.ts`, not
+     * the `./x.js` that a compiling toolchain would expect.
+     *
+     * That forces two settings together:
+     *   allowImportingTsExtensions  lets tsc accept the .ts specifiers node needs
+     *   emitDeclarationOnly         is required alongside it, and is correct here
+     *                               anyway because nothing consumes emitted JS.
+     *
+     * `erasableSyntaxOnly` makes tsc reject syntax that stripping cannot handle
+     * (enums, namespaces, parameter properties), so a file that type checks is
+     * guaranteed to run under node directly.
+     *
+     * Verified on node v22.22.2 with typescript 5.9.3, 2026-08-22.
+     */
+    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true,
+    "skipLibCheck": true,
+
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true
+  }
+}

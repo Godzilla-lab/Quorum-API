@@ -1,0 +1,594 @@
+/*
+ * The corpus conformance suite.
+ *
+ * Written once and run against every driver, because "identical query results
+ * from both drivers" is the M1 acceptance criterion and a hand comparison would
+ * not survive the first schema change.
+ *
+ * Note what this deliberately does NOT do: diff against the existing engine's
+ * corpus.db byte for byte. Rows now carry a receipt_id that the old file does
+ * not have, so byte equality is impossible by construction. Conformance is
+ * defined on the query surface instead, which is the thing callers actually
+ * depend on.
+ */
+
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+
+import type { CorpusDriver } from './driver.ts';
+import { MIN_RECEIPTS, WARM_MIN_DOCS } from './constants.ts';
+import { receiptId } from './receipt-id.ts';
+import type { AdObservationInput, DocInput } from './types.ts';
+
+const doc = (over: Partial<DocInput> = {}): DocInput => ({
+  source: 'reddit',
+  kind: 'comment',
+  externalId: 't1_default',
+  channel: 'running',
+  text: 'these shoes run small and I had to size up half a size',
+  score: 12,
+  url: 'https://reddit.com/r/running/comments/x/',
+  createdUtc: 1_700_000_000,
+  ...over,
+});
+
+const ad = (over: Partial<AdObservationInput> = {}): AdObservationInput => ({
+  adId: 'ad_1',
+  advertiser: 'Acme',
+  category: 'running shoes',
+  body: 'The shoe that fits',
+  cta: 'Shop now',
+  url: 'https://facebook.com/ads/library/?id=ad_1',
+  creative: 'video',
+  platforms: ['facebook', 'instagram'],
+  startDate: 1_700_000_000,
+  endDate: null,
+  isActive: true,
+  daysRunning: 30,
+  durationConfidence: 'observed',
+  ...over,
+});
+
+/*
+ * A controllable clock. Tests that care about time move it explicitly rather
+ * than sleeping, which keeps the suite fast and deterministic.
+ */
+export interface TestClock {
+  now: () => number;
+  advanceDays: (days: number) => void;
+  advanceSeconds: (seconds: number) => void;
+}
+
+function makeClock(startUnixSeconds = 1_700_000_000): TestClock {
+  let t = startUnixSeconds;
+  return {
+    now: () => t,
+    advanceDays: (days) => { t += Math.round(days * 86400); },
+    advanceSeconds: (seconds) => { t += seconds; },
+  };
+}
+
+/*
+ * `open` is a factory rather than an instance so each test gets a clean corpus.
+ * A shared one would let write order leak between tests, and the ad append
+ * behaviour is exactly the property that would hide behind that.
+ *
+ * The factory takes a clock so a driver can be tested against controlled time.
+ */
+export function runConformanceSuite(
+  driverName: string,
+  open: (now?: () => number) => Promise<CorpusDriver>,
+): void {
+  const withCorpus = async (fn: (c: CorpusDriver) => Promise<void>): Promise<void> => {
+    const corpus = await open();
+    try { await fn(corpus); } finally { await corpus.close(); }
+  };
+
+  const withClock = async (fn: (c: CorpusDriver, clock: TestClock) => Promise<void>): Promise<void> => {
+    const clock = makeClock();
+    const corpus = await open(clock.now);
+    try { await fn(corpus, clock); } finally { await corpus.close(); }
+  };
+
+  test(`${driverName}: an empty corpus reports empty rather than throwing`, async () => {
+    await withCorpus(async (c) => {
+      assert.deepEqual(await c.totals(), { docs: 0, categories: 0, reports: 0, adObservations: 0 });
+      assert.deepEqual(await c.search('anything'), []);
+      assert.deepEqual(await c.byCategory('nothing'), []);
+      assert.deepEqual(await c.getByReceiptIds(['rc_0000000000000000']), []);
+
+      const stats = await c.categoryStats('never seen');
+      assert.equal(stats.docs, 0);
+      assert.equal(stats.ageDays, null);
+      assert.equal(stats.warm, false, 'a category with no history is never warm');
+    });
+  });
+
+  test(`${driverName}: addDocs counts only genuinely new rows`, async () => {
+    await withCorpus(async (c) => {
+      const first = await c.addDocs([doc({ externalId: 'a' }), doc({ externalId: 'b' })], 'running shoes');
+      assert.equal(first, 2);
+
+      const again = await c.addDocs([doc({ externalId: 'a' }), doc({ externalId: 'b' })], 'running shoes');
+      assert.equal(again, 0, 're-harvesting the same records adds nothing, which is how we know a category was already warm');
+
+      const third = await c.addDocs([doc({ externalId: 'c' })], 'running shoes');
+      assert.equal(third, 1);
+    });
+  });
+
+  test(`${driverName}: records without text or an external id are skipped, not stored`, async () => {
+    await withCorpus(async (c) => {
+      const added = await c.addDocs(
+        [doc({ externalId: 'ok' }), doc({ externalId: '', text: 'orphan' }), doc({ externalId: 'x', text: '' })],
+        'running shoes',
+      );
+      assert.equal(added, 1);
+      assert.equal((await c.totals()).docs, 1);
+    });
+  });
+
+  test(`${driverName}: receipt ids are assigned and resolve back to the record`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: 't1_real', text: 'the toe box is too narrow' })], 'running shoes');
+
+      const expected = receiptId('reddit', 't1_real');
+      const [found] = await c.getByReceiptIds([expected]);
+
+      assert.ok(found, 'the id minted at write time must resolve at read time');
+      assert.equal(found.receiptId, expected);
+      assert.equal(found.text, 'the toe box is too narrow');
+      assert.equal(found.channel, 'running');
+    });
+  });
+
+  test(`${driverName}: an invented receipt id resolves to nothing`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: 'real' })], 'running shoes');
+      const found = await c.getByReceiptIds(['rc_deadbeefdeadbeef']);
+      assert.deepEqual(found, [], 'this is what makes a fabricated citation impossible rather than unlikely');
+    });
+  });
+
+  /*
+   * The load bearing one for corroboration counting. The same comment harvested
+   * while researching two categories is two rows, and it must resolve to ONE
+   * record, or a claim supported by one person can be reported as two.
+   */
+  test(`${driverName}: one utterance in two categories resolves to one receipt`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: 'shared' })], 'running shoes');
+      await c.addDocs([doc({ externalId: 'shared' })], 'trail shoes');
+      assert.equal((await c.totals()).docs, 2, 'two rows, because category is part of row identity');
+
+      const resolved = await c.getByReceiptIds([receiptId('reddit', 'shared')]);
+      assert.equal(resolved.length, 1, 'but one receipt, or corroboration counts this person twice');
+    });
+  });
+
+  test(`${driverName}: full text search finds records and respects filters`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: '1', text: 'the sizing runs small on these', score: 50 }),
+        doc({ externalId: '2', text: 'battery life is excellent', score: 5 }),
+        doc({ externalId: '3', source: 'youtube', text: 'sizing was my only complaint', score: 30 }),
+      ], 'running shoes');
+
+      const hits = await c.search('sizing');
+      assert.equal(hits.length, 2, 'both sizing records match, the battery one does not');
+
+      const redditOnly = await c.search('sizing', { source: 'reddit' });
+      assert.equal(redditOnly.length, 1);
+      assert.equal(redditOnly[0]?.source, 'reddit');
+
+      const highScore = await c.search('sizing', { minScore: 40 });
+      assert.equal(highScore.length, 1);
+      assert.equal(highScore[0]?.externalId, '1');
+
+      const otherCategory = await c.search('sizing', { category: 'headphones' });
+      assert.deepEqual(otherCategory, []);
+    });
+  });
+
+  test(`${driverName}: a query of only short words returns nothing rather than everything`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: '1' })], 'running shoes');
+      assert.deepEqual(await c.search('a to的'), [], 'tokens of two characters or fewer are dropped');
+      assert.deepEqual(await c.search('   '), []);
+    });
+  });
+
+  test(`${driverName}: punctuation in a query cannot break the FTS parser`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: '1', text: 'sizing complaints here' })], 'running shoes');
+      /* Each of these would be a syntax error if passed to MATCH unescaped. */
+      for (const q of ['sizing"', 'sizing*', '(sizing)', 'sizing^2', 'sizing:foo', '"""']) {
+        await assert.doesNotReject(() => c.search(q), `query ${q} must not throw`);
+      }
+    });
+  });
+
+  test(`${driverName}: warmth needs both volume and recency`, async () => {
+    await withCorpus(async (c) => {
+      const many: DocInput[] = [];
+      for (let i = 0; i < WARM_MIN_DOCS; i++) many.push(doc({ externalId: `bulk_${i}` }));
+
+      await c.addDocs(many.slice(0, WARM_MIN_DOCS - 1), 'running shoes');
+      assert.equal((await c.categoryStats('running shoes')).warm, false, 'one below the floor is cold');
+
+      await c.addDocs([doc({ externalId: 'one_more' })], 'running shoes');
+      const stats = await c.categoryStats('running shoes');
+      assert.equal(stats.docs, WARM_MIN_DOCS);
+      assert.equal(stats.warm, true, 'freshly harvested and at the floor is warm');
+      assert.ok(stats.ageDays !== null && stats.ageDays < 1);
+    });
+  });
+
+  test(`${driverName}: category stats count comments and distinct channels`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: '1', kind: 'post', channel: 'running' }),
+        doc({ externalId: '2', kind: 'comment', channel: 'running' }),
+        doc({ externalId: '3', kind: 'comment', channel: 'trailrunning' }),
+      ], 'running shoes');
+
+      const stats = await c.categoryStats('running shoes');
+      assert.equal(stats.docs, 3);
+      assert.equal(stats.comments, 2);
+      assert.equal(stats.channels, 2);
+    });
+  });
+
+  /*
+   * MARCH 2024 and APRIL 2024, chosen because they are far from any boundary a
+   * timezone could push a record across. A histogram test dated to the first of
+   * a month would pass or fail depending on where the test runs.
+   */
+  const MAR_2024 = 1_710_000_000;
+  const APR_2024 = 1_712_600_000;
+
+  test(`${driverName}: the date histogram buckets by the author's month, not ours`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: '1', createdUtc: MAR_2024, text: 'these run small in the toe box' }),
+        doc({ externalId: '2', createdUtc: MAR_2024, text: 'sizing is strange on these' }),
+        doc({ externalId: '3', createdUtc: APR_2024, text: 'the sole wore through fast' }),
+      ], 'running shoes');
+
+      const all = await c.dateHistogram({ category: 'running shoes' });
+      assert.deepEqual(all.buckets, [
+        { period: '2024-03', records: 2 },
+        { period: '2024-04', records: 1 },
+      ]);
+      assert.equal(all.undated, 0);
+
+      /* The numerator, from the same call shape. A share needs both. */
+      const sized = await c.dateHistogram({ category: 'running shoes', query: 'sizing' });
+      assert.deepEqual(sized.buckets, [{ period: '2024-03', records: 1 }]);
+    });
+  });
+
+  test(`${driverName}: a corrupt date is counted as undated rather than inventing a month`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: '1', createdUtc: MAR_2024 }),
+        /* Milliseconds where seconds were expected. Lands in the year 56000 and
+         * would otherwise invent a period in which nobody said anything. */
+        doc({ externalId: '2', createdUtc: MAR_2024 * 1000 }),
+        doc({ externalId: '3', createdUtc: 0 }),
+      ], 'running shoes');
+
+      const histogram = await c.dateHistogram({ category: 'running shoes' });
+      assert.deepEqual(histogram.buckets, [{ period: '2024-03', records: 1 }]);
+      assert.equal(histogram.undated, 2, 'reported, never silently dropped');
+    });
+  });
+
+  test(`${driverName}: the histogram is scoped to its category and counts the whole of it`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: '1', createdUtc: MAR_2024 })], 'running shoes');
+      await c.addDocs([doc({ externalId: '2', createdUtc: MAR_2024 })], 'trail shoes');
+
+      const shoes = await c.dateHistogram({ category: 'running shoes' });
+      assert.deepEqual(shoes.buckets, [{ period: '2024-03', records: 1 }]);
+
+      /* An unknown category is empty rather than an error, because that is what
+       * every category looks like before its first run. */
+      assert.deepEqual(await c.dateHistogram({ category: 'nothing here' }), { buckets: [], undated: 0 });
+    });
+  });
+
+  test(`${driverName}: the histogram counts past any row cap, because a share needs the whole denominator`, async () => {
+    await withCorpus(async (c) => {
+      /*
+       * MEASURED 2026-08-22 on a real 1,181 record category. Computing the
+       * denominator from `byCategory` instead, which caps its rows, printed the
+       * share of `sizing` as 8.70% when it is 7.37%. The overstatement grows
+       * with the corpus: the cap is fixed and the category is not, so on a
+       * 10,000 record category the row path is out by nearly ten times.
+       *
+       * 450 records, which is past the 400 row default `byCategory` returns.
+       */
+      const many = Array.from({ length: 450 }, (_, i) => doc({
+        externalId: `bulk-${i}`,
+        createdUtc: MAR_2024,
+        text: i < 90 ? 'the sizing on these is strange' : 'a comment about something else entirely',
+      }));
+      await c.addDocs(many, 'running shoes');
+
+      const all = await c.dateHistogram({ category: 'running shoes' });
+      const total = all.buckets.reduce((n, b) => n + b.records, 0) + all.undated;
+      assert.equal(total, 450, 'the histogram counts every record, not a page of them');
+
+      const rows = await c.byCategory('running shoes');
+      assert.ok(rows.length < total, 'while the row path is capped, which is the point');
+
+      const sized = await c.dateHistogram({ category: 'running shoes', query: 'sizing' });
+      const matched = sized.buckets.reduce((n, b) => n + b.records, 0);
+      assert.equal(matched, 90);
+      assert.equal((100 * matched) / total, 20, 'a share computed on the real denominator');
+    });
+  });
+
+  test(`${driverName}: a query that reduces to nothing matches nothing, not everything`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: '1', createdUtc: MAR_2024 })], 'running shoes');
+      /* The denominator and a dead query must not be the same answer, or a
+       * share of conversation comes out as 100%. */
+      const dead = await c.dateHistogram({ category: 'running shoes', query: 'a of' });
+      assert.deepEqual(dead, { buckets: [], undated: 0 });
+    });
+  });
+
+  test(`${driverName}: an as-of window filters on the author's date, not ours`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'old', createdUtc: MAR_2024, text: 'the sizing was strange back then' }),
+        doc({ externalId: 'new', createdUtc: APR_2024, text: 'the sizing is strange now' }),
+      ], 'running shoes');
+
+      /* Everything up to the end of March. `harvestedAt` for both rows is now,
+       * so a window that filtered on OUR date would return both or neither. */
+      const asOfMarch = await c.search('sizing', { category: 'running shoes', until: MAR_2024 + 86_400 });
+      assert.deepEqual(asOfMarch.map((d) => d.externalId), ['old']);
+
+      const sinceApril = await c.search('sizing', { category: 'running shoes', from: APR_2024 });
+      assert.deepEqual(sinceApril.map((d) => d.externalId), ['new']);
+
+      /* And with no window, both. */
+      assert.equal((await c.search('sizing', { category: 'running shoes' })).length, 2);
+    });
+  });
+
+  test(`${driverName}: byCategory takes the same window, so a denominator can match`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'old', createdUtc: MAR_2024 }),
+        doc({ externalId: 'new', createdUtc: APR_2024 }),
+      ], 'running shoes');
+
+      const held = await c.byCategory('running shoes', { until: MAR_2024 + 86_400 });
+      assert.deepEqual(held.map((d) => d.externalId), ['old']);
+    });
+  });
+
+  test(`${driverName}: AN UNDATED RECORD IS EXCLUDED FROM A WINDOW, NEVER ASSUMED RECENT`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'dated', createdUtc: MAR_2024, text: 'sizing is strange' }),
+        doc({ externalId: 'undated', createdUtc: 0, text: 'sizing is strange too' }),
+      ], 'running shoes');
+
+      /* Assuming would place undated evidence inside every window it was never
+       * shown to belong to, which is a fabricated date with a claim on top. */
+      const windowed = await c.search('sizing', { category: 'running shoes', until: APR_2024 });
+      assert.deepEqual(windowed.map((d) => d.externalId), ['dated']);
+
+      /* Unwindowed it is still real evidence and still comes back. */
+      assert.equal((await c.search('sizing', { category: 'running shoes' })).length, 2);
+    });
+  });
+
+  test(`${driverName}: a remembered plan survives a round trip`, async () => {
+    await withCorpus(async (c) => {
+      await c.rememberCategory('running shoes', {
+        subreddits: ['running', 'trailrunning'],
+        queries: ['sizing', 'durability'],
+      });
+      const stats = await c.categoryStats('running shoes');
+      assert.deepEqual(stats.subreddits, ['running', 'trailrunning']);
+      assert.deepEqual(stats.queries, ['sizing', 'durability']);
+    });
+  });
+
+  /*
+   * THE REGRESSION TEST FOR THE DEFECT THIS TABLE EXISTS TO FIX.
+   *
+   * The engine wrote ads into the shared docs table, unique on
+   * (source, external_id, category) with INSERT OR IGNORE, so the second
+   * sighting of an ad was silently dropped and its day count froze at first
+   * sight. It also cost money: a re-run re-paid the vendor per ad for
+   * observations that were then discarded.
+   */
+  test(`${driverName}: observing the same ad twice records two observations`, async () => {
+    await withClock(async (c, clock) => {
+      assert.equal(await c.addAdObservations([ad({ daysRunning: 30 })]), 1);
+
+      clock.advanceDays(30);
+      assert.equal(await c.addAdObservations([ad({ daysRunning: 60 })]), 1, 'the second sighting is evidence, not a duplicate');
+
+      const history = await c.adObservations('ad_1');
+      assert.equal(history.length, 2, 'this is the assertion the old schema could not satisfy');
+      assert.equal(history[0]?.daysRunning, 30);
+      assert.equal(history[1]?.daysRunning, 60, 'and the day count moves rather than freezing at first sight');
+
+      const span = (history[1]?.observedAt ?? 0) - (history[0]?.observedAt ?? 0);
+      assert.equal(span, 30 * 86400, 'the gap between sightings is the evidence a duration is built from');
+      assert.equal((await c.totals()).adObservations, 2);
+    });
+  });
+
+  test(`${driverName}: an untypeable creative stays null and is not bucketed`, async () => {
+    await withCorpus(async (c) => {
+      await c.addAdObservations([ad({ adId: 'ad_untyped', creative: null })]);
+      const [obs] = await c.adObservations('ad_untyped');
+      assert.equal(obs?.creative, null, 'a ratio computed over guesses is worse than no ratio');
+    });
+  });
+
+  test(`${driverName}: duration provenance survives storage`, async () => {
+    await withCorpus(async (c) => {
+      await c.addAdObservations([
+        ad({ adId: 'r', durationConfidence: 'reported', daysRunning: 94, isActive: false, endDate: 1_700_100_000 }),
+        ad({ adId: 'o', durationConfidence: 'observed', daysRunning: 12, isActive: true, endDate: null }),
+        ad({ adId: 'n', durationConfidence: 'none', daysRunning: null, startDate: null }),
+      ]);
+
+      assert.equal((await c.adObservations('r'))[0]?.durationConfidence, 'reported');
+      assert.equal((await c.adObservations('o'))[0]?.durationConfidence, 'observed');
+
+      const none = (await c.adObservations('n'))[0];
+      assert.equal(none?.durationConfidence, 'none');
+      assert.equal(none?.daysRunning, null, 'no evidenced date means no duration at all, never a guess');
+    });
+  });
+
+  test(`${driverName}: latest ads by category returns one row per ad`, async () => {
+    await withCorpus(async (c) => {
+      await c.addAdObservations([ad({ adId: 'x', daysRunning: 10 }), ad({ adId: 'y', daysRunning: 5 })]);
+      await c.addAdObservations([ad({ adId: 'x', daysRunning: 40 })]);
+      /* Deliberately written in the same second, because production does that
+       * too and the query must still pick the later row. */
+
+      const latest = await c.latestAdsByCategory('running shoes');
+      assert.equal(latest.length, 2, 'two ads, not three observations');
+      assert.equal(latest[0]?.adId, 'x', 'ordered by how long they have been running');
+      assert.equal(latest[0]?.daysRunning, 40, 'and it is the most recent sighting, not the first');
+    });
+  });
+
+  test(`${driverName}: reports round trip and are readable by category`, async () => {
+    await withCorpus(async (c) => {
+      await c.saveReport({
+        productUrl: 'https://example.com/shoe',
+        productTitle: 'Trail Shoe',
+        category: 'running shoes',
+        markdown: '# report',
+        findings: { themes: ['sizing'] },
+        costUsd: 0.0143,
+      });
+      const prior = await c.priorReports('running shoes');
+      assert.equal(prior.length, 1);
+      assert.equal(prior[0]?.productTitle, 'Trail Shoe');
+      assert.deepEqual(prior[0]?.findings, { themes: ['sizing'] });
+    });
+  });
+
+  test(`${driverName}: the product cache expires rather than serving stale facts`, async () => {
+    await withClock(async (c, clock) => {
+      await c.cacheProduct({ url: 'https://example.com/shoe', title: 'Shoe', source: 'shopify' }, 'running shoes');
+
+      assert.equal((await c.getProduct('https://example.com/shoe'))?.title, 'Shoe');
+
+      clock.advanceDays(29);
+      assert.equal((await c.getProduct('https://example.com/shoe'))?.title, 'Shoe', 'inside the default 30 day budget');
+
+      clock.advanceDays(2);
+      assert.equal(await c.getProduct('https://example.com/shoe'), null, 'past it, the cache must not serve stale facts');
+
+      assert.equal(await c.getProduct('https://example.com/never-seen'), null);
+    });
+  });
+
+  /*
+   * The takedown path. A record removed at source has to be removable here, and
+   * the full text index has to forget it too, or a deleted comment keeps
+   * surfacing in search while resolving to nothing.
+   */
+  test(`${driverName}: deleting a record removes it from search as well as storage`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: 'takedown', text: 'a distinctive phrase worth removing' })], 'running shoes');
+      assert.equal((await c.search('distinctive')).length, 1);
+
+      const removed = await c.deleteByExternalId('reddit', 'takedown');
+      assert.equal(removed, 1);
+
+      assert.deepEqual(await c.search('distinctive'), [], 'the FTS index must forget it too');
+      assert.deepEqual(await c.getByReceiptIds([receiptId('reddit', 'takedown')]), []);
+      assert.equal((await c.totals()).docs, 0);
+    });
+  });
+
+  test(`${driverName}: deleting removes the record from every category it was harvested into`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: 'shared' })], 'running shoes');
+      await c.addDocs([doc({ externalId: 'shared' })], 'trail shoes');
+      assert.equal(await c.deleteByExternalId('reddit', 'shared'), 2, 'a takedown is not per category');
+      assert.equal((await c.totals()).docs, 0);
+    });
+  });
+
+
+  test(`${driverName}: A NUL IN A RECORD DOES NOT DISCARD THE BATCH AROUND IT`, async () => {
+    /*
+     * MEASURED 2026-08-22. A NUL in a doc's text threw on write, and because a
+     * batch is one transaction that rolls back, ONE poisoned record discarded
+     * every good record beside it. Postgres refuses a NUL in a text column
+     * outright, so neither driver survived it.
+     *
+     * It arrives from upstream rather than from a caller: JSON encodes a NUL as
+     * an escape perfectly legally, so any source parsing JSON can hand us one.
+     * A harvest we cannot store is a harvest that has to be paid for twice.
+     */
+    const NUL = String.fromCharCode(0);
+    await withCorpus(async (c) => {
+      const added = await c.addDocs([
+        doc({ externalId: 'clean_1', text: 'the sole separated after a month' }),
+        doc({ externalId: 'nul_1', text: `sizing${NUL}runs small` }),
+        doc({ externalId: 'clean_2', text: 'the arch support is excellent' }),
+      ], 'running shoes');
+
+      assert.equal(added, 3, 'the good records must survive the bad one');
+
+      /* The record is stored, and BOTH halves of it are searchable. A NUL that
+       * was deleted rather than replaced would weld the words either side into
+       * one that nobody wrote. */
+      const [stored] = await c.getByReceiptIds([receiptId('reddit', 'nul_1')]);
+      assert.ok(stored, 'the record itself is kept, not dropped');
+      assert.equal(stored.text.includes(NUL), false);
+      assert.equal(stored.text, 'sizing runs small');
+
+      const hits = await c.search('sizing', { category: 'running shoes' });
+      assert.equal(hits.length, 1);
+    });
+  });
+
+  test(`${driverName}: a newline inside a record is content and survives storage`, async () => {
+    /* The query path collapses whitespace because a query is not evidence.
+     * This path must not: a forum comment has paragraphs, and this is the only
+     * copy of it that will exist. */
+    await withCorpus(async (c) => {
+      const text = 'first para about sizing\n\nsecond para about durability';
+      await c.addDocs([doc({ externalId: 'multi', text })], 'running shoes');
+      const [stored] = await c.getByReceiptIds([receiptId('reddit', 'multi')]);
+      assert.equal(stored?.text, text);
+    });
+  });
+
+  test(`${driverName}: a NUL in an ad body does not discard the batch either`, async () => {
+    const NUL = String.fromCharCode(0);
+    await withCorpus(async (c) => {
+      const written = await c.addAdObservations([
+        ad({ adId: 'ad_clean' }),
+        ad({ adId: 'ad_nul', body: `buy${NUL}now` }),
+      ]);
+      assert.equal(written, 2);
+      const [obs] = await c.adObservations('ad_nul');
+      assert.equal(obs?.body, 'buy now');
+    });
+  });
+
+  test(`${driverName}: the corroboration threshold is a shared constant, not a local guess`, () => {
+    assert.equal(MIN_RECEIPTS, 3);
+  });
+}

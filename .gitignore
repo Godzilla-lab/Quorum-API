@@ -1,0 +1,26 @@
+# Secrets. Never commit these.
+.env
+.env.*
+!.env.example
+
+# The corpus is data, not source. It is also the moat.
+*.db
+*.db-shm
+*.db-wal
+corpus/
+!packages/corpus/
+
+# Generated reports
+out/
+reports/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Fixtures captured live that have not been reviewed for personal data
+fixtures/raw/
+
+node_modules/
+.DS_Store
+coverage/

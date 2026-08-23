@@ -1,0 +1,54 @@
+# Upstream drift detection.
+#
+# THE ONLY JOB HERE THAT IS ALLOWED, AND REQUIRED, TO USE THE NETWORK.
+#
+# `ci.yml` runs the suite inside a network namespace with no route off the host,
+# because a fixture based suite that quietly reaches the wire is worse than
+# useless. That guarantees the tests are honest about themselves. It guarantees
+# nothing about whether the fixtures still describe the world.
+#
+# Every fixture in this repo is a photograph of a vendor that has already moved
+# at least once. The Apify rate changed by 7.6x in nine days. A Hacker News
+# adapter once filtered on a `points` field that comments do not have, matched
+# zero of 6,903 comments in production, and passed its tests throughout because
+# the fixture invented the field.
+#
+# So this job asks the world the questions the parsers ask, weekly, and fails
+# loudly when the answers change shape. It is the early warning system for
+# every other test in the repo.
+
+name: drift
+
+on:
+  schedule:
+    # Mondays at 06:00 UTC, so a break is found at the start of a week rather
+    # than discovered by a customer at the end of one.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install
+        run: npm ci
+
+      # First: prove the checker itself still works, by running its contracts
+      # against the stored fixtures. If this goes red the contracts have drifted
+      # from the parsers, which is a different and worse problem than a vendor
+      # changing, and a live failure would be impossible to interpret.
+      - name: Contracts match the fixtures
+        run: npm run check:drift:fixtures
+
+      # Then: the same contracts against the real endpoints. No keys are set,
+      # so only the free, unauthenticated sources are exercised. A vendor being
+      # down reports as unreachable and does not fail the job, because a job
+      # that cries wolf is a job everyone learns to ignore.
+      - name: Upstreams still match what the parsers read
+        run: npm run check:drift

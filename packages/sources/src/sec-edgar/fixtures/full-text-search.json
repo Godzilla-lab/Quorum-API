@@ -1,0 +1,596 @@
+{
+ "took": 493,
+ "timed_out": false,
+ "_shards": {
+  "total": 50,
+  "successful": 50,
+  "skipped": 0,
+  "failed": 0
+ },
+ "hits": {
+  "total": {
+   "value": 126,
+   "relation": "eq"
+  },
+  "max_score": 15.11304,
+  "hits": [
+   {
+    "_index": "edgar_file",
+    "_id": "0001477932-15-001997:inst_10k.htm",
+    "_score": 15.11304,
+    "_source": {
+     "ciks": [
+      "0001592365"
+     ],
+     "period_ending": "2014-12-31",
+     "file_num": [
+      "333-192585"
+     ],
+     "display_names": [
+      "Instride Inc  (CIK 0001592365)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "10-K"
+     ],
+     "file_date": "2015-03-31",
+     "biz_states": [
+      "FL"
+     ],
+     "sics": [
+      "5940"
+     ],
+     "form": "10-K",
+     "adsh": "0001477932-15-001997",
+     "film_num": [
+      "15735770"
+     ],
+     "biz_locations": [
+      "Miami, FL"
+     ],
+     "file_type": "10-K",
+     "file_description": "FORM 10-K",
+     "inc_states": [
+      "DE"
+     ],
+     "items": []
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0000049401-02-000002:exh10-20.txt",
+    "_score": 14.670657,
+    "_source": {
+     "ciks": [
+      "0000049401"
+     ],
+     "period_ending": "2002-01-04",
+     "file_num": [
+      "000-05083"
+     ],
+     "display_names": [
+      "SAUCONY INC  (CIK 0000049401)"
+     ],
+     "xsl": null,
+     "sequence": 6,
+     "root_forms": [
+      "10-K"
+     ],
+     "file_date": "2002-04-03",
+     "biz_states": [
+      "MA"
+     ],
+     "sics": [
+      "3021"
+     ],
+     "form": "10-K",
+     "adsh": "0000049401-02-000002",
+     "film_num": [
+      "02600865"
+     ],
+     "biz_locations": [
+      "Peabody, MA"
+     ],
+     "file_type": "EX-10",
+     "file_description": "SEVERANCE AGREEMENT",
+     "inc_states": [
+      "MA"
+     ],
+     "items": []
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0000049401-01-000008:0001.txt",
+    "_score": 11.608576,
+    "_source": {
+     "ciks": [
+      "0000049401"
+     ],
+     "period_ending": "2001-01-05",
+     "file_num": [
+      "000-05083"
+     ],
+     "display_names": [
+      "SAUCONY INC  (CIK 0000049401)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "10-K"
+     ],
+     "file_date": "2001-04-04",
+     "biz_states": [
+      "MA"
+     ],
+     "sics": [
+      "3021"
+     ],
+     "form": "10-K",
+     "adsh": "0000049401-01-000008",
+     "film_num": [
+      "1595598"
+     ],
+     "biz_locations": [
+      "Peabody, MA"
+     ],
+     "file_type": "10-K",
+     "file_description": "FORM 10-K",
+     "inc_states": [
+      "MA"
+     ],
+     "items": []
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0001047469-04-007907:a2130829z10-k.htm",
+    "_score": 10.90987,
+    "_source": {
+     "ciks": [
+      "0000770949"
+     ],
+     "period_ending": "2003-12-31",
+     "file_num": [
+      "001-09340"
+     ],
+     "display_names": [
+      "REEBOK INTERNATIONAL LTD  (CIK 0000770949)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "10-K"
+     ],
+     "file_date": "2004-03-15",
+     "biz_states": [
+      "MA"
+     ],
+     "sics": [
+      "3021"
+     ],
+     "form": "10-K",
+     "adsh": "0001047469-04-007907",
+     "film_num": [
+      "04668563"
+     ],
+     "biz_locations": [
+      "Canton, MA"
+     ],
+     "file_type": "10-K",
+     "file_description": "FORM 10-K",
+     "inc_states": [
+      "MA"
+     ],
+     "items": []
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0000049401-02-000002:doc0110k.txt",
+    "_score": 10.327009,
+    "_source": {
+     "ciks": [
+      "0000049401"
+     ],
+     "period_ending": "2002-01-04",
+     "file_num": [
+      "000-05083"
+     ],
+     "display_names": [
+      "SAUCONY INC  (CIK 0000049401)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "10-K"
+     ],
+     "file_date": "2002-04-03",
+     "biz_states": [
+      "MA"
+     ],
+     "sics": [
+      "3021"
+     ],
+     "form": "10-K",
+     "adsh": "0000049401-02-000002",
+     "film_num": [
+      "02600865"
+     ],
+     "biz_locations": [
+      "Peabody, MA"
+     ],
+     "file_type": "10-K",
+     "file_description": "FORM 10-K",
+     "inc_states": [
+      "MA"
+     ],
+     "items": []
+    }
+   },
+   {
+    "_index": "edgar_file",
+    "_id": "0000950148-04-000712:v97221e10vk.htm",
+    "_score": 10.264996,
+    "_source": {
+     "ciks": [
+      "0000910521"
+     ],
+     "period_ending": "2003-12-31",
+     "file_num": [
+      "000-22446"
+     ],
+     "display_names": [
+      "DECKERS OUTDOOR CORP  (DECK)  (CIK 0000910521)"
+     ],
+     "xsl": null,
+     "sequence": 1,
+     "root_forms": [
+      "10-K"
+     ],
+     "file_date": "2004-03-26",
+     "biz_states": [
+      "CA"
+     ],
+     "sics": [
+      "3021"
+     ],
+     "form": "10-K",
+     "adsh": "0000950148-04-000712",
+     "film_num": [
+      "04694040"
+     ],
+     "biz_locations": [
+      "Goleta, CA"
+     ],
+     "file_type": "10-K",
+     "file_description": "FORM 10-K - FISCAL YEAR ENDED DECEMBER 31, 2003",
+     "inc_states": [
+      "DE"
+     ],
+     "items": []
+    }
+   }
+  ]
+ },
+ "aggregations": {
+  "entity_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": [
+    {
+     "key": "COLUMBIA SPORTSWEAR CO  (COLM)  (CIK 0001050797)",
+     "doc_count": 18
+    },
+    {
+     "key": "SKECHERS USA INC  (SKX)  (CIK 0001065837)",
+     "doc_count": 17
+    },
+    {
+     "key": "DECKERS OUTDOOR CORP  (DECK)  (CIK 0000910521)",
+     "doc_count": 8
+    },
+    {
+     "key": "HYBRID Coating Technologies Inc.  (CIK 0001445235)",
+     "doc_count": 7
+    },
+    {
+     "key": "Academy Sports & Outdoors, Inc.  (ASO)  (CIK 0001817358)",
+     "doc_count": 6
+    },
+    {
+     "key": "FLEXPOINT SENSOR SYSTEMS INC  (FLXT)  (CIK 0000925660)",
+     "doc_count": 6
+    },
+    {
+     "key": "K SWISS INC  (CIK 0000862480)",
+     "doc_count": 6
+    },
+    {
+     "key": "SAUCONY INC  (CIK 0000049401)",
+     "doc_count": 6
+    },
+    {
+     "key": "FINISH LINE INC /IN/  (CIK 0000886137)",
+     "doc_count": 5
+    },
+    {
+     "key": "FREESCALE SEMICONDUCTOR INC  (CIK 0001272547)",
+     "doc_count": 5
+    },
+    {
+     "key": "HIBBETT SPORTING GOODS INC  (CIK 0001017480)",
+     "doc_count": 5
+    },
+    {
+     "key": "CYPRESS SEMICONDUCTOR CORP /DE/  (CIK 0000791915)",
+     "doc_count": 4
+    },
+    {
+     "key": "DICKS SPORTING GOODS INC  (DKS)  (CIK 0001089063)",
+     "doc_count": 4
+    },
+    {
+     "key": "Freescale Semiconductor Holdings I, Ltd.  (CIK 0001392522)",
+     "doc_count": 3
+    },
+    {
+     "key": "HCi Viocare  (CIK 0001402737)",
+     "doc_count": 3
+    },
+    {
+     "key": "REEBOK INTERNATIONAL LTD  (CIK 0000770949)",
+     "doc_count": 3
+    },
+    {
+     "key": "Allbirds, Inc.  (BIRD)  (CIK 0001653909)",
+     "doc_count": 2
+    },
+    {
+     "key": "FOOT LOCKER INC  (FL)  (CIK 0000850209)",
+     "doc_count": 2
+    },
+    {
+     "key": "FOOT LOCKER, INC.  (FL)  (CIK 0000850209)",
+     "doc_count": 2
+    },
+    {
+     "key": "HIBBETT SPORTS INC  (CIK 0001017480)",
+     "doc_count": 2
+    },
+    {
+     "key": "Identiv, Inc.  (INVE)  (CIK 0001036044)",
+     "doc_count": 2
+    },
+    {
+     "key": "MPM Holdings Inc.  (CIK 0001624826)",
+     "doc_count": 2
+    },
+    {
+     "key": "Momentive Performance Materials Inc.  (CIK 0001405041)",
+     "doc_count": 2
+    },
+    {
+     "key": "OXFORD INDUSTRIES INC  (OXM)  (CIK 0000075288)",
+     "doc_count": 2
+    },
+    {
+     "key": "AMERICAN INCOME FUND I-E  (CIK 0000868681)",
+     "doc_count": 1
+    },
+    {
+     "key": "Beach Acquisition Co Parent, LLC  (CIK 0002066659)",
+     "doc_count": 1
+    },
+    {
+     "key": "Instride Inc  (CIK 0001592365)",
+     "doc_count": 1
+    },
+    {
+     "key": "Neiman Marcus Group LTD LLC  (CIK 0001358651)",
+     "doc_count": 1
+    },
+    {
+     "key": "Rafina Innovations Inc.  (CIK 0001402737)",
+     "doc_count": 1
+    },
+    {
+     "key": "SHOE CARNIVAL INC  (SCVL)  (CIK 0000895447)",
+     "doc_count": 1
+    }
+   ]
+  },
+  "sic_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": [
+    {
+     "key": "3140",
+     "doc_count": 24
+    },
+    {
+     "key": "2300",
+     "doc_count": 20
+    },
+    {
+     "key": "5940",
+     "doc_count": 18
+    },
+    {
+     "key": "3021",
+     "doc_count": 17
+    },
+    {
+     "key": "3674",
+     "doc_count": 12
+    },
+    {
+     "key": "5661",
+     "doc_count": 10
+    },
+    {
+     "key": "2851",
+     "doc_count": 7
+    },
+    {
+     "key": "3829",
+     "doc_count": 6
+    },
+    {
+     "key": "3841",
+     "doc_count": 4
+    },
+    {
+     "key": "2320",
+     "doc_count": 2
+    },
+    {
+     "key": "2821",
+     "doc_count": 2
+    },
+    {
+     "key": "2860",
+     "doc_count": 2
+    },
+    {
+     "key": "3577",
+     "doc_count": 2
+    },
+    {
+     "key": "5311",
+     "doc_count": 1
+    },
+    {
+     "key": "7359",
+     "doc_count": 1
+    }
+   ]
+  },
+  "biz_states_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": [
+    {
+     "key": "CA",
+     "doc_count": 46
+    },
+    {
+     "key": "OR",
+     "doc_count": 18
+    },
+    {
+     "key": "TX",
+     "doc_count": 12
+    },
+    {
+     "key": "MA",
+     "doc_count": 10
+    },
+    {
+     "key": "AL",
+     "doc_count": 7
+    },
+    {
+     "key": "NY",
+     "doc_count": 7
+    },
+    {
+     "key": "IN",
+     "doc_count": 6
+    },
+    {
+     "key": "UT",
+     "doc_count": 6
+    },
+    {
+     "key": "PA",
+     "doc_count": 4
+    },
+    {
+     "key": "X0",
+     "doc_count": 4
+    },
+    {
+     "key": "D0",
+     "doc_count": 3
+    },
+    {
+     "key": "GA",
+     "doc_count": 2
+    },
+    {
+     "key": "FL",
+     "doc_count": 1
+    }
+   ]
+  },
+  "form_filter": {
+   "doc_count_error_upper_bound": 0,
+   "sum_other_doc_count": 0,
+   "buckets": [
+    {
+     "key": "10-K",
+     "doc_count": 126
+    }
+   ]
+  }
+ },
+ "query": {
+  "_source": {
+   "exclude": [
+    "doc_text"
+   ]
+  },
+  "query": {
+   "bool": {
+    "must": [
+     {
+      "match_phrase": {
+       "doc_text": "running shoes"
+      }
+     }
+    ],
+    "must_not": [],
+    "should": [],
+    "filter": [
+     {
+      "terms": {
+       "root_forms": [
+        "10-K"
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "from": 0,
+  "size": 100,
+  "aggregations": {
+   "form_filter": {
+    "terms": {
+     "field": "root_forms",
+     "size": 30
+    }
+   },
+   "entity_filter": {
+    "terms": {
+     "field": "display_names.raw",
+     "size": 30
+    }
+   },
+   "sic_filter": {
+    "terms": {
+     "field": "sics",
+     "size": 30
+    }
+   },
+   "biz_states_filter": {
+    "terms": {
+     "field": "biz_states",
+     "size": 30
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,136 @@
+/*
+ * The SQLite schema.
+ *
+ * Deliberately Postgres shaped so the second driver is a driver and not a
+ * rewrite: same tables, same columns, and `docs_fts` becomes a tsvector column
+ * plus a GIN index rather than a virtual table.
+ *
+ * Vectors are deliberately absent. `embedding` is reserved on `docs` so adding
+ * pgvector later is a migration and not a redesign, and semantic matching does
+ * not get built until full text retrieval demonstrably fails to earn it.
+ */
+
+export const SCHEMA_VERSION = 1;
+
+export const SQLITE_SCHEMA = `
+CREATE TABLE IF NOT EXISTS docs (
+  id            INTEGER PRIMARY KEY,
+  receipt_id    TEXT NOT NULL,          -- rc_ + 16 hex, content addressed
+  source        TEXT NOT NULL,          -- reddit | youtube | review | hackernews | ...
+  kind          TEXT NOT NULL,          -- post | comment
+  external_id   TEXT NOT NULL,
+  category      TEXT NOT NULL,
+  channel       TEXT,                   -- subreddit, video title, forum name
+  text          TEXT NOT NULL,
+  score         INTEGER DEFAULT 0,
+  url           TEXT,
+  created_utc   INTEGER DEFAULT 0,
+  harvested_at  INTEGER NOT NULL,
+  embedding     BLOB,                   -- reserved: pgvector lands here later
+  UNIQUE (source, external_id, category)
+);
+
+/*
+ * receipt_id is NOT unique. The same utterance harvested under two categories
+ * is two rows carrying one receipt id, on purpose: the id names the human's
+ * words, not the row. Corroboration counting dedupes by receipt id so that one
+ * person cannot be counted twice.
+ */
+CREATE INDEX IF NOT EXISTS docs_receipt_idx  ON docs (receipt_id);
+CREATE INDEX IF NOT EXISTS docs_category_idx ON docs (category, source, score DESC);
+CREATE INDEX IF NOT EXISTS docs_harvest_idx  ON docs (category, harvested_at DESC);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts
+  USING fts5(text, content='docs', content_rowid='id', tokenize='porter unicode61');
+
+CREATE TRIGGER IF NOT EXISTS docs_ai AFTER INSERT ON docs BEGIN
+  INSERT INTO docs_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS docs_ad AFTER DELETE ON docs BEGIN
+  INSERT INTO docs_fts(docs_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+CREATE TRIGGER IF NOT EXISTS docs_au AFTER UPDATE ON docs BEGIN
+  INSERT INTO docs_fts(docs_fts, rowid, text) VALUES ('delete', old.id, old.text);
+  INSERT INTO docs_fts(rowid, text) VALUES (new.id, new.text);
+END;
+
+/*
+ * Ad observations: APPEND ONLY, and the reason this table exists separately.
+ *
+ * The engine wrote ads into docs, which is unique on
+ * (source, external_id, category) and written with INSERT OR IGNORE. So the
+ * second sighting of an ad was silently discarded and its day count froze at
+ * first sight, while the comment above the writing function promised the
+ * opposite: that snapshots accumulate into the dated history Meta does not keep
+ * for commercial ads. Verified 2026-08-22.
+ *
+ * There is no unique constraint here beyond the surrogate key, and that is the
+ * design. Two rows for one ad is the evidence, not a duplicate.
+ */
+CREATE TABLE IF NOT EXISTS ad_observations (
+  id                   INTEGER PRIMARY KEY,
+  ad_id                TEXT NOT NULL,
+  advertiser           TEXT NOT NULL DEFAULT '',
+  category             TEXT NOT NULL,
+  body                 TEXT NOT NULL DEFAULT '',
+  cta                  TEXT NOT NULL DEFAULT '',
+  url                  TEXT NOT NULL DEFAULT '',
+  creative             TEXT,            -- video | static | NULL when untypeable
+  platforms            TEXT NOT NULL DEFAULT '[]',
+  start_date           INTEGER,
+  end_date             INTEGER,         -- only set once the ad has STOPPED
+  is_active            INTEGER NOT NULL DEFAULT 0,
+  days_running         INTEGER,
+  duration_confidence  TEXT NOT NULL DEFAULT 'none',
+  observed_at          INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ad_obs_ad_idx       ON ad_observations (ad_id, observed_at);
+CREATE INDEX IF NOT EXISTS ad_obs_category_idx ON ad_observations (category, observed_at DESC);
+
+-- One row per category we have ever looked at: the warm/cold signal.
+CREATE TABLE IF NOT EXISTS categories (
+  name           TEXT PRIMARY KEY,
+  first_seen     INTEGER NOT NULL,
+  last_harvested INTEGER NOT NULL,
+  subreddits     TEXT,                  -- JSON array, the picked set worth reusing
+  queries        TEXT                   -- JSON array, the query plan worth reusing
+);
+
+/*
+ * Reports are memory too: the second report in a category starts from the first.
+ *
+ * TENANT BOUNDARY. Reports are tenant owned; docs and categories are global.
+ * Scoping records per tenant would destroy cross tenant warmth, which is the
+ * entire hosted product. Scoping nothing would leak reports between customers.
+ * Both mistakes are silent, so the boundary is stated here rather than assumed.
+ */
+CREATE TABLE IF NOT EXISTS reports (
+  id            INTEGER PRIMARY KEY,
+  tenant_id     TEXT,
+  product_url   TEXT NOT NULL,
+  product_title TEXT,
+  category      TEXT NOT NULL,
+  markdown      TEXT NOT NULL,
+  findings      TEXT,                   -- JSON
+  cost_usd      REAL DEFAULT 0,
+  created_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reports_category_idx ON reports (category, created_at DESC);
+CREATE INDEX IF NOT EXISTS reports_tenant_idx   ON reports (tenant_id, created_at DESC);
+
+-- Product resolution cache, so re-running a URL never re-pays the unlocker.
+CREATE TABLE IF NOT EXISTS products (
+  url        TEXT PRIMARY KEY,
+  title      TEXT,
+  category   TEXT,
+  facts      TEXT NOT NULL,             -- JSON
+  source     TEXT,
+  fetched_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`;

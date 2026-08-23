@@ -1,0 +1,52 @@
+{
+  "data": [
+    {
+      "display_name": "running",
+      "over18": false,
+      "public_description": "All runners welcome.",
+      "subscribers": 3940136
+    },
+    {
+      "display_name": "RunningShoeGeeks",
+      "over18": false,
+      "public_description": "A place for runners to share running shoe related news, releases, reviews, and deals. Please use our sister sub r/AskRunningShoeGeeks for all personal questions or recommendation requests.\n\nThis sub is NOT affiliated with any other RunningShoeGeeks on other social media platforms.",
+      "subscribers": 225792
+    },
+    {
+      "display_name": "RunningWithDogs",
+      "over18": false,
+      "public_description": "Two feet, four paws! A community for people who combine the two greatest things in all the world - running and dogs!",
+      "subscribers": 83098
+    },
+    {
+      "display_name": "RunningCirclejerk",
+      "over18": false,
+      "public_description": "Jerkers of all things running",
+      "subscribers": 79912
+    },
+    {
+      "display_name": "runningman",
+      "over18": false,
+      "public_description": "This is the fan-powered subreddit for the  variety show franchise \"Running Man\" which includes the original SBS version (South Korea), the Disney+ spin-off, Zhejiang TV's \"Keep Running\" (China), and HTV's \"Chạy đi chờ chi\" (Vietnam).",
+      "subscribers": 63834
+    },
+    {
+      "display_name": "runningmemes",
+      "over18": false,
+      "public_description": "A place for people to post running-related memes, funny pictures, etc. ",
+      "subscribers": 52549
+    },
+    {
+      "display_name": "runningmusic",
+      "over18": false,
+      "public_description": "Share your favourite running music and discover new music to run or work out to",
+      "subscribers": 42809
+    },
+    {
+      "display_name": "runninglifestyle",
+      "over18": false,
+      "public_description": "A good vibes place where anything about running can be posted without fear of being told \"It doesn't add to the community\".\n\n- If you're a runner. \n- Have something to say that's important/funny/interesting to you.\n\nThen it's probably important to the rest of the community too.\n\nSo fellow lovers of sore feet and legs... come aboard the running train.\n\n*Choo Choo*",
+      "subscribers": 29975
+    }
+  ]
+}

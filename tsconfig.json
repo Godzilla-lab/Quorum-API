@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/corpus" },
+    { "path": "packages/sources" },
+    { "path": "packages/llm" },
+    { "path": "packages/core" },
+    { "path": "packages/cli" },
+    { "path": "packages/server" },
+    { "path": "packages/sdk-js" },
+    { "path": "packages/mcp" }
+  ]
+}
