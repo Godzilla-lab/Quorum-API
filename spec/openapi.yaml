@@ -72,8 +72,8 @@ info:
     url: https://github.com/Godzilla-lab/Quorum-API
 
 servers:
-  - url: https://api.receipts.dev/v1
-    description: Hosted
+  - url: https://quorum-api-j15n.onrender.com/v1
+    description: Hosted. A free tier instance, so the first request after a quiet spell waits for it to wake.
   - url: http://localhost:8787/v1
     description: Local, npm run dev -w packages/server
 
