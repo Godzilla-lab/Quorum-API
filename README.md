@@ -12,6 +12,7 @@ rather than a README asserting it.
 [![CI](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml/badge.svg)](https://github.com/Godzilla-lab/Quorum-API/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
+[![npm](https://img.shields.io/npm/v/quorum-api.svg)](https://www.npmjs.com/package/quorum-api)
 [![Tests](https://img.shields.io/badge/tests-1%2C107-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
@@ -146,7 +147,7 @@ non zero and says which one.
 | **JavaScript SDK** | Working, 11 methods |
 | **Webhooks** | Working. Signed to Standard Webhooks, durable, retried for about 75 hours |
 | **Hosted API** | **Deployed and live** at https://quorum-api-j15n.onrender.com, on PostgreSQL, verified against the running instance |
-| **npm** | Not published. The CLI means cloning this repo today |
+| **npm** | **Published**: `npx quorum-api "running shoes"`. Five packages, zero external dependencies |
 | **Corpus** | Nearly empty. The engine works; there is little in it yet |
 
 > [!NOTE]
@@ -199,6 +200,15 @@ only ever ADD sources, and a missing one degrades a run rather than failing it.
 ## Quick start
 
 Requires **Node 22.18 or newer**, and nothing else.
+
+```bash
+npx quorum-api "running shoes"
+```
+
+That is the whole install. Five packages come down from npm, about 240 KB with
+zero external dependencies, and the first report starts.
+
+Working on Quorum itself is the clone path:
 
 ```bash
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
@@ -261,8 +271,9 @@ can be chased and is never stated as a market pattern. Before anything is
 printed, every cited receipt is fetched back out of the corpus, and the run
 exits non zero if one of them does not resolve.
 
-`quorum --help` lists the flags. Every command above runs from inside the
-checkout, because nothing is published to npm yet.
+`quorum --help` lists the flags. Every command above works through
+`npx quorum-api` with nothing cloned, or through the `quorum` bin inside a
+checkout; they are the same binary.
 
 ### HTTP API
 
