@@ -332,15 +332,23 @@ export function createReceiptsServer(options: ServerOptions): Server {
           spec: 'https://github.com/Godzilla-lab/Quorum-API/blob/main/spec/openapi.yaml',
           source: 'https://github.com/Godzilla-lab/Quorum-API',
           health: '/v1/healthz',
-          authenticate: 'send your key as a Bearer token in the Authorization header, on every /v1 path',
           /*
-           * The question every keyed api forgets to answer on its front door.
-           * Issued by hand while the api is early, and the door says so
-           * honestly instead of leaving a stranger with a 401 and no path.
+           * The question every keyed api forgets to answer on its front door,
+           * answered for whichever mode this instance is actually in. An open
+           * door saying "send your key" is as useless as a locked one saying
+           * nothing.
            */
-          getAKey: options.contactEmail
-            ? `keys are issued by hand while the api is early. Email ${options.contactEmail} to request one.`
-            : 'keys are issued by hand while the api is early. Ask through the source repository.',
+          ...(requireAuth
+            ? {
+              authenticate: 'send your key as a Bearer token in the Authorization header, on every /v1 path',
+              getAKey: options.contactEmail
+                ? `keys are issued by hand while the api is early. Email ${options.contactEmail} to request one.`
+                : 'keys are issued by hand while the api is early. Ask through the source repository.',
+            }
+            : {
+              authenticate: 'no key is needed. This instance is open and free, and the rate limits are shared by everyone, so be gentle.',
+              tryIt: '/v1/categories/running%20shoes',
+            }),
         },
       }),
     },

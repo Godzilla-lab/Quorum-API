@@ -634,3 +634,16 @@ test('the root tells a stranger how to get a key', async () => {
     assert.equal(body.getAKey.includes('@'), false, 'no address is invented');
   } finally { await without.close(); }
 });
+
+/* An open door saying "send your key" is as useless as a locked one saying
+ * nothing, so the signpost states whichever mode the instance is really in. */
+test('an open instance says no key is needed, and where to try it', async () => {
+  const s = await live({ requireAuth: false });
+  try {
+    const body = await (await fetch(`${s.base}/`)).json() as { authenticate: string; getAKey?: string; tryIt?: string };
+    assert.match(body.authenticate, /no key is needed/i);
+    assert.match(body.authenticate, /shared/i, 'the shared limits are said out loud');
+    assert.equal(body.getAKey, undefined, 'no key process is advertised when there is no key');
+    assert.match(body.tryIt ?? '', /^\/v1\//, 'and it hands the visitor a first request to make');
+  } finally { await s.close(); }
+});
