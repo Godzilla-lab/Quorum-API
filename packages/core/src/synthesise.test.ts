@@ -115,6 +115,39 @@ test('the record cap is a hard stop', () => {
   assert.equal(book.byOrdinal.size, 10);
 });
 
+/*
+ * The incident: 143 of 200 records from one subreddit, and a book that took
+ * the first 300 in caller order handed the model one community's opinion as
+ * the market's. The sample in evidence.ts got its spread first; the prompt
+ * kept the bias until 2026-08-24.
+ */
+test('a loud channel cannot crowd the quiet ones out of the book', () => {
+  const loud = Array.from({ length: 40 }, (_, i) =>
+    doc({ externalId: `loud${i}`, text: `loud record ${i}`, channel: 'r/big' }));
+  const quiet = Array.from({ length: 5 }, (_, i) =>
+    doc({ externalId: `quiet${i}`, text: `quiet record ${i}`, channel: 'r/small' }));
+
+  /* The loud channel first in caller order, which is exactly the case that
+   * used to exclude the quiet one entirely. */
+  const book = buildEvidenceBook([...loud, ...quiet], { maxRecords: 10 });
+
+  assert.equal(book.records, 10);
+  const quietShown = quiet.filter((q) => book.block.includes(q.text)).length;
+  assert.equal(quietShown, 5, 'every record from the quiet channel made the book');
+});
+
+test('within one channel, the best scoring records make the book first', () => {
+  const book = buildEvidenceBook([
+    doc({ externalId: 'low', text: 'barely noticed', score: 1 }),
+    doc({ externalId: 'high', text: 'widely agreed', score: 90 }),
+    doc({ externalId: 'mid', text: 'somewhat agreed', score: 40 }),
+  ], { maxRecords: 2 });
+
+  assert.ok(book.block.includes('widely agreed'));
+  assert.ok(book.block.includes('somewhat agreed'));
+  assert.equal(book.block.includes('barely noticed'), false);
+});
+
 test('a long record is truncated and counted, and the rest still fit', () => {
   const book = buildEvidenceBook([
     doc({ externalId: 'long', text: 'x'.repeat(500) }),

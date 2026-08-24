@@ -87,6 +87,51 @@ const clean = (text: string): string =>
    * oriented block lets its own content look like the start of a new record. */
   text.replace(/\s+/g, ' ').trim();
 
+/*
+ * ROUND ROBIN ACROSS CHANNELS, NOT FIRST COME.
+ *
+ * The book takes a few hundred records from a corpus that may hold thousands,
+ * and until 2026-08-24 it took the first ones in whatever order the caller
+ * supplied. On a corpus where one subreddit supplies 143 of 200 records, that
+ * meant the model read one community's opinion and the report presented it as
+ * the market's. The same incident is recorded in evidence.ts, where the
+ * three quote sample got its spread first; the prompt the claims are actually
+ * synthesised from kept the bias.
+ *
+ * One from each channel in rotation, best scoring first within a channel,
+ * until the cap. A channel with little to say runs out and the rotation
+ * simply skips it, so nothing is wasted on padding. Dedup by receipt id
+ * happens here, because the same utterance harvested under two categories is
+ * two rows and showing it twice would invite the model to cite it twice.
+ */
+function spreadAcrossChannels(records: readonly Doc[], max: number): Doc[] {
+  const seen = new Set<string>();
+  const queues = new Map<string, Doc[]>();
+  for (const record of records) {
+    if (seen.has(record.receiptId)) continue;
+    seen.add(record.receiptId);
+    const key = `${record.source}/${record.channel}`;
+    const queue = queues.get(key);
+    if (queue) queue.push(record);
+    else queues.set(key, [record]);
+  }
+  /* Stable, so equal scores keep the caller's order and a single channel
+   * corpus behaves exactly as the book always did. */
+  for (const queue of queues.values()) queue.sort((a, b) => b.score - a.score);
+
+  const picked: Doc[] = [];
+  let drained = false;
+  while (picked.length < max && !drained) {
+    drained = true;
+    for (const queue of queues.values()) {
+      if (picked.length >= max) break;
+      const next = queue.shift();
+      if (next) { picked.push(next); drained = false; }
+    }
+  }
+  return picked;
+}
+
 export function buildEvidenceBook(
   records: readonly Doc[],
   options: { maxRecords?: number; maxCharsPerRecord?: number } = {},
@@ -99,14 +144,8 @@ export function buildEvidenceBook(
   const lines: string[] = [];
   let truncated = 0;
   let characters = 0;
-  /* One receipt appears once. The same utterance harvested under two categories
-   * is two rows, and showing it twice would invite the model to cite it twice. */
-  const seen = new Set<string>();
 
-  for (const record of records) {
-    if (lines.length >= maxRecords) break;
-    if (seen.has(record.receiptId)) continue;
-    seen.add(record.receiptId);
+  for (const record of spreadAcrossChannels(records, maxRecords)) {
 
     const kind = record.kind === 'post' ? 'post' : 'comment';
     const ordinal = `${PREFIX[kind] ?? 'c'}${counters[kind] ?? 0}`;
