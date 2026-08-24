@@ -180,6 +180,26 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
 -- The only scan besides the primary key: pruning by age.
 CREATE INDEX IF NOT EXISTS report_snapshots_prune_idx ON report_snapshots (created_at);
 
+/*
+ * The spend ledger: every metered dollar, appended as it is charged.
+ *
+ * The quota module keeps its counters in memory, which is right for request
+ * rates (a one minute window lost on restart is harmless) and wrong for
+ * money: the daily vendor budget reset every time the free tier slept, so
+ * "$2 per day" actually meant "$2 per uptime stretch". On boot the server
+ * sums the recent window from here and seeds the in memory counters, so a
+ * restart no longer refills anyone's budget. Append only; a charge is a fact
+ * that happened.
+ */
+CREATE TABLE IF NOT EXISTS spend_ledger (
+  id         INTEGER PRIMARY KEY,
+  key_label  TEXT NOT NULL,
+  amount_usd REAL NOT NULL,
+  spent_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS spend_ledger_at_idx ON spend_ledger (spent_at);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL

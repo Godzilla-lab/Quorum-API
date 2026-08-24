@@ -52,6 +52,7 @@ import type {
   ReportSnapshotInput,
   SearchOptions,
   SourceId,
+  SpendByKey,
   StoredReportSnapshot,
 } from '../types.ts';
 
@@ -488,6 +489,32 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
     async pruneReportSnapshots(before: number): Promise<number> {
       const rows = await sql.query<{ report_id: string }>(
         'DELETE FROM report_snapshots WHERE created_at < $1 RETURNING report_id',
+        [before],
+      );
+      return rows.length;
+    },
+
+    async recordSpend(keyLabel: string, amountUsd: number): Promise<void> {
+      if (!Number.isFinite(amountUsd) || amountUsd <= 0) return;
+      await sql.query(
+        'INSERT INTO spend_ledger (key_label, amount_usd, spent_at) VALUES ($1,$2,$3)',
+        [keyLabel, amountUsd, nowSeconds()],
+      );
+    },
+
+    async spendSince(since: number): Promise<SpendByKey[]> {
+      const rows = await sql.query<{ key_label: string; total_usd: unknown }>(
+        `SELECT key_label, SUM(amount_usd) AS total_usd
+         FROM spend_ledger WHERE spent_at >= $1
+         GROUP BY key_label`,
+        [since],
+      );
+      return rows.map((r) => ({ keyLabel: r.key_label, totalUsd: num(r.total_usd) }));
+    },
+
+    async pruneSpend(before: number): Promise<number> {
+      const rows = await sql.query<{ id: unknown }>(
+        'DELETE FROM spend_ledger WHERE spent_at < $1 RETURNING id',
         [before],
       );
       return rows.length;

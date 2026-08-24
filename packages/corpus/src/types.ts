@@ -199,6 +199,12 @@ export interface StoredReportSnapshot {
   createdAt: number;
 }
 
+/* What one key has spent inside a window, summed from the ledger. */
+export interface SpendByKey {
+  keyLabel: string;
+  totalUsd: number;
+}
+
 /*
  * A queued webhook delivery.
  *

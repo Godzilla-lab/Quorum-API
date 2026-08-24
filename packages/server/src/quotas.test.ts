@@ -268,3 +268,38 @@ test('spend is reported in usage, lifetime rather than windowed', () => {
   assert.equal(q.snapshot('k', 0, at(3_600_002)).spendUsd, 0.7);
   assert.equal(q.canSpend('k', at(3_600_003)).keyRemainingUsd, 0.7);
 });
+
+/* ------------------------------------------------------------------ */
+/* the ledger hooks                                                    */
+/* ------------------------------------------------------------------ */
+
+test('every charge reaches the persistence hook, and refused amounts never do', () => {
+  const written: { keyLabel: string; usd: number }[] = [];
+  const q = createQuotas(LIMITS, { onCharge: (keyLabel, usd) => written.push({ keyLabel, usd }) });
+  q.charge('k', 0.25, at(0));
+  q.charge('k', 0, at(1));
+  q.charge('k', -3, at(2));
+  q.charge('k', Number.NaN, at(3));
+  assert.deepEqual(written, [{ keyLabel: 'k', usd: 0.25 }],
+    'only the real charge is a fact worth appending');
+});
+
+/*
+ * The restart fix. The ledger remembers, seedSpend replays, and a rebooted
+ * instance refuses metered work exactly where the crashed one would have.
+ */
+test('seeded spend counts against both budgets as if it had been charged here', () => {
+  const q = createQuotas(LIMITS);
+  q.seedSpend([{ keyLabel: 'a', totalUsd: 0.8 }, { keyLabel: 'b', totalUsd: 0.9 }], at(0));
+
+  assert.ok(Math.abs(q.canSpend('a', at(1)).keyRemainingUsd - 0.2) < 1e-9, 'the key allowance remembers');
+  const instance = q.canSpend('a', at(2)).instanceRemainingUsd;
+  assert.ok(Math.abs(instance - 0.8) < 1e-9, 'the instance budget remembers every key: 2.5 - 0.8 - 0.9');
+});
+
+test('seeding nothing changes nothing', () => {
+  const q = createQuotas(LIMITS);
+  q.seedSpend([], at(0));
+  q.seedSpend([{ keyLabel: 'k', totalUsd: 0 }, { keyLabel: 'k', totalUsd: -1 }], at(0));
+  assert.equal(q.canSpend('k', at(1)).keyRemainingUsd, 1, 'the full allowance stands');
+});

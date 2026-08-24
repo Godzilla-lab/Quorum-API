@@ -167,10 +167,17 @@ webhookWorker?.start();
  * tier that sleeps may never see a timer fire.
  */
 const SNAPSHOT_RETAIN_SECONDS = 30 * 86_400;
+/* A week: any spend window is a day, so nothing can ever need a row this old,
+ * and a week of margin keeps the ledger inspectable after an incident. */
+const SPEND_RETAIN_SECONDS = 7 * 86_400;
 const pruneSnapshots = (): void => {
   void corpus.pruneReportSnapshots(Math.floor(Date.now() / 1000) - SNAPSHOT_RETAIN_SECONDS)
     .catch((err: unknown) => {
       process.stderr.write(`snapshots: prune failed, next attempt in a day: ${err instanceof Error ? err.message : 'unknown'}\n`);
+    });
+  void corpus.pruneSpend(Math.floor(Date.now() / 1000) - SPEND_RETAIN_SECONDS)
+    .catch((err: unknown) => {
+      process.stderr.write(`spend ledger: prune failed, next attempt in a day: ${err instanceof Error ? err.message : 'unknown'}\n`);
     });
 };
 pruneSnapshots();
@@ -384,7 +391,32 @@ const limits = {
   spendPerKeyUsd,
   spendTotalUsd,
 };
-const quotas = createQuotas(limits);
+const quotas = createQuotas(limits, {
+  /* Fire and forget: the in memory counter enforces, the ledger is what a
+   * restart replays, and a failed write must not fail the charge. */
+  onCharge: (keyLabel, usd) => {
+    void corpus.recordSpend(keyLabel, usd).catch((err: unknown) => {
+      process.stderr.write(`spend ledger: write failed, the in memory counter still holds: ${err instanceof Error ? err.message : 'unknown'}\n`);
+    });
+  },
+});
+
+/*
+ * REPLAY THE LEDGER BEFORE TAKING TRAFFIC, or the boot itself is the budget
+ * reset this exists to end. Failing to read it degrades to the old behaviour
+ * (a fresh window) rather than refusing to start, and says so.
+ */
+try {
+  const since = Math.floor(Date.now() / 1000) - Math.floor(DEFAULT_LIMITS.spendWindowMs / 1000);
+  const seeded = await corpus.spendSince(since);
+  if (seeded.length) {
+    quotas.seedSpend(seeded);
+    const total = seeded.reduce((n, s) => n + s.totalUsd, 0);
+    process.stderr.write(`spend: replayed $${total.toFixed(4)} across ${seeded.length} key(s) from the ledger\n`);
+  }
+} catch (err) {
+  process.stderr.write(`spend: could not replay the ledger, budgets start fresh this boot: ${err instanceof Error ? err.message : 'unknown'}\n`);
+}
 
 /* Doubles as the key request address on the root signpost, so setting it for
  * the SEC also answers the question a stranger has at the front door. */

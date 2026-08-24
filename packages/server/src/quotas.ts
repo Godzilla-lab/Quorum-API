@@ -13,15 +13,17 @@
  * because a request rate does not bound work that is already running: without
  * it one key holds the whole job queue with requests it made slowly.
  *
- * IN MEMORY, DELIBERATELY, FOR NOW.
+ * IN MEMORY FOR RATES, DURABLE FOR MONEY, since 2026-08-24.
  *
- * This is correct for one instance, which is what the hosted tier is today,
- * and it needs no corpus schema change to ship. What it costs is honest and
- * bounded: a restart forgets the current window, which resets a limit early
- * and never enforces one that was not real. It becomes wrong the day a second
- * instance exists, because two processes would each allow the full quota, and
- * at that point this moves behind the corpus driver. The interface below is
- * the shape that move needs, so the call sites will not change.
+ * The rate counters stay in memory: correct for one instance, and a restart
+ * forgetting a one minute window resets a limit early and never enforces one
+ * that was not real. Money could not live by that rule. The daily spend caps
+ * reset every time the free tier slept, so "$2 per day" meant "$2 per uptime
+ * stretch". Charges now also append to the corpus spend ledger through the
+ * `persistence` hook, and `seedSpend` replays the recent window at boot. The
+ * rate counters still become wrong the day a second instance exists, and at
+ * that point they move behind the corpus driver too; the interface is the
+ * shape that move needs, so the call sites will not change.
  *
  * A FIXED WINDOW RATHER THAN A TOKEN BUCKET. A bucket smooths bursts, which
  * sounds better and is worse here: the thing being protected is a 0.1 CPU
@@ -157,13 +159,35 @@ export interface Quotas {
   canSpend(keyLabel: string, now?: number): SpendDecision;
   /* Charge money to a key, so usage reports what a caller actually cost. */
   charge(keyLabel: string, usd: number, now?: number): void;
+  /*
+   * Seed the spend counters from the durable ledger, once, at boot. This is
+   * the half of the restart fix that lives here: the ledger remembers, this
+   * replays. Seeded spend lands in a window that starts NOW even though some
+   * of it is hours old, which enforces slightly LONGER than a day on the
+   * seeded portion. That direction is chosen: over enforcing a budget after
+   * a crash is an inconvenience, refilling one is a bill.
+   */
+  seedSpend(entries: readonly { keyLabel: string; totalUsd: number }[], now?: number): void;
   /* What `GET /v1/usage` returns. */
   snapshot(keyLabel: string, running: number, now?: number): UsageSnapshot;
   /* Every key seen since start, for an operator. Never includes a key itself. */
   keys(): string[];
 }
 
-export function createQuotas(limits: QuotaLimits = DEFAULT_LIMITS): Quotas {
+export interface QuotaPersistence {
+  /*
+   * Called on every charge, fire and forget: the in memory counter is the
+   * one that enforces, the ledger is what a restart replays. A write that
+   * fails loses one row of replay and must not fail the charge, so the
+   * implementation catches its own errors.
+   */
+  onCharge(keyLabel: string, usd: number): void;
+}
+
+export function createQuotas(
+  limits: QuotaLimits = DEFAULT_LIMITS,
+  persistence?: QuotaPersistence,
+): Quotas {
   const keys = new Map<string, KeyRecord>();
   /* The instance total, tracked apart from any key, because the thing it
    * protects is a single vendor balance shared by all of them. */
@@ -283,6 +307,21 @@ export function createQuotas(limits: QuotaLimits = DEFAULT_LIMITS): Quotas {
       rec.spendUsd += usd;
       rec.spendInWindow += usd;
       instanceSpend += usd;
+      persistence?.onCharge(keyLabel, usd);
+    },
+
+    seedSpend(entries, now = Date.now()) {
+      for (const { keyLabel, totalUsd } of entries) {
+        if (!Number.isFinite(totalUsd) || totalUsd <= 0) continue;
+        const rec = record(keyLabel, now);
+        rec.spendUsd += totalUsd;
+        rec.spendInWindow += totalUsd;
+        if (now - instanceWindowStart >= limits.spendWindowMs) {
+          instanceWindowStart = now;
+          instanceSpend = 0;
+        }
+        instanceSpend += totalUsd;
+      }
     },
 
     snapshot(keyLabel, running, now = Date.now()) {

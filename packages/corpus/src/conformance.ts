@@ -577,6 +577,41 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * The spend ledger. What matters is the window sum, because that is what
+   * seeds the in memory budget on boot: get it wrong and a restart either
+   * refills a spent budget or double charges an innocent key.
+   */
+  test(`${driverName}: spend appends, sums per key inside the window, and prunes by age`, async () => {
+    await withClock(async (c, clock) => {
+      await c.recordSpend('key-1', 0.25);
+      await c.recordSpend('key-1', 0.05);
+      await c.recordSpend('key-2', 0.10);
+      clock.advanceDays(2);
+      await c.recordSpend('key-1', 0.40);
+
+      const window = await c.spendSince(clock.now() - 86_400);
+      const key1 = window.find((s) => s.keyLabel === 'key-1');
+      assert.ok(Math.abs((key1?.totalUsd ?? 0) - 0.40) < 1e-9, 'only the charge inside the window counts');
+      assert.equal(window.find((s) => s.keyLabel === 'key-2'), undefined, 'key-2 spent nothing recently');
+
+      const removed = await c.pruneSpend(clock.now() - 86_400);
+      assert.equal(removed, 3, 'the three old rows go, the recent one stays');
+      const after = await c.spendSince(0);
+      assert.equal(after.length, 1);
+      assert.ok(Math.abs((after[0]?.totalUsd ?? 0) - 0.40) < 1e-9);
+    });
+  });
+
+  test(`${driverName}: a zero or negative charge is refused at the ledger, not recorded`, async () => {
+    await withCorpus(async (c) => {
+      await c.recordSpend('key-1', 0);
+      await c.recordSpend('key-1', -5);
+      await c.recordSpend('key-1', Number.NaN);
+      assert.deepEqual(await c.spendSince(0), [], 'nothing credit shaped may enter an append only money log');
+    });
+  });
+
   test(`${driverName}: the product cache expires rather than serving stale facts`, async () => {
     await withClock(async (c, clock) => {
       await c.cacheProduct({ url: 'https://example.com/shoe', title: 'Shoe', source: 'shopify' }, 'running shoes');

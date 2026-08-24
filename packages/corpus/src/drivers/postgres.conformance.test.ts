@@ -68,7 +68,7 @@ if (!PG_URL) {
 
     await client.exec(`CREATE SCHEMA ${schema}`);
     await client.exec(`SET search_path TO ${schema}`);
-    for (const file of ['001_initial.sql', '002_rls.sql', '003_webhook_deliveries.sql', '004_report_snapshots.sql']) {
+    for (const file of ['001_initial.sql', '002_rls.sql', '003_webhook_deliveries.sql', '004_report_snapshots.sql', '005_spend_ledger.sql']) {
       await client.exec(readFileSync(join(MIGRATIONS, file), 'utf8'));
     }
 

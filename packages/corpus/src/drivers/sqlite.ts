@@ -43,6 +43,7 @@ import type {
   ReportSnapshotInput,
   SearchOptions,
   SourceId,
+  SpendByKey,
   StoredReportSnapshot,
 } from '../types.ts';
 
@@ -611,6 +612,26 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
 
     async pruneReportSnapshots(before: number): Promise<number> {
       const result = db.prepare('DELETE FROM report_snapshots WHERE created_at < ?').run(before);
+      return Number(result.changes);
+    },
+
+    async recordSpend(keyLabel: string, amountUsd: number): Promise<void> {
+      if (!Number.isFinite(amountUsd) || amountUsd <= 0) return;
+      db.prepare('INSERT INTO spend_ledger (key_label, amount_usd, spent_at) VALUES (?, ?, ?)')
+        .run(keyLabel, amountUsd, nowSeconds());
+    },
+
+    async spendSince(since: number): Promise<SpendByKey[]> {
+      const rows = db.prepare(`
+        SELECT key_label, SUM(amount_usd) AS total_usd
+        FROM spend_ledger WHERE spent_at >= ?
+        GROUP BY key_label
+      `).all(since) as unknown as { key_label: string; total_usd: number }[];
+      return rows.map((r) => ({ keyLabel: r.key_label, totalUsd: Number(r.total_usd) }));
+    },
+
+    async pruneSpend(before: number): Promise<number> {
+      const result = db.prepare('DELETE FROM spend_ledger WHERE spent_at < ?').run(before);
       return Number(result.changes);
     },
 

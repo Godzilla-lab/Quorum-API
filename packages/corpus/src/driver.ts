@@ -32,6 +32,7 @@ import type {
   ProductFacts,
   ReportInput,
   ReportSnapshotInput,
+  SpendByKey,
   StoredReportSnapshot,
   DateHistogram,
   DateHistogramOptions,
@@ -120,6 +121,18 @@ export interface CorpusDriver {
   /* Snapshots are all settled by definition, so age is the only criterion.
    * Returns the number removed. */
   pruneReportSnapshots(before: number): Promise<number>;
+
+  /*
+   * The spend ledger. Money is the one quota counter that must survive a
+   * restart: a daily budget that resets whenever a free tier sleeps is a
+   * budget per uptime stretch, which is not what the operator agreed to.
+   * `recordSpend` appends; `spendSince` sums per key from a cutoff so the
+   * server can seed its in memory counters on boot; `pruneSpend` drops rows
+   * old enough that no window can ever need them again.
+   */
+  recordSpend(keyLabel: string, amountUsd: number): Promise<void>;
+  spendSince(since: number): Promise<SpendByKey[]>;
+  pruneSpend(before: number): Promise<number>;
 
   /*
    * Prior reports for a category, SCOPED TO ONE TENANT.
