@@ -34,6 +34,7 @@ import { createQuotas, DEFAULT_LIMITS } from './quotas.ts';
 import { openPostgres } from './postgres.ts';
 import { createJobQueue, type ReportRequest, type RunOutcome } from './jobs.ts';
 import { checkInstanceSecret, createWebhookWorker } from './webhooks.ts';
+import { runCorpusOpener } from './run-corpus.ts';
 import type { RetrievalResult } from '@quorum/core';
 import { computeClaims } from './claims.ts';
 
@@ -173,9 +174,12 @@ const queue = createJobQueue({
     }
 
     /*
-     * A FRESH CORPUS HANDLE PER RUN, because `runResearch` closes the corpus it
-     * was given in a `finally`. Handing it the long lived one would close the
-     * database out from under every other request the moment a report finished.
+     * THE RUN RETRIEVES INTO THE SAME CORPUS THE CLAIMS READ. On Postgres that
+     * is the shared driver, whose `close()` is a no op by design; on SQLite it
+     * is a fresh handle per run, because `runResearch` closes the corpus it
+     * was given in a `finally` and the long lived handle must survive the
+     * report finishing. The split lives in `run-corpus.ts` with the incident
+     * that made it load bearing.
      */
     const result: RunResult = await runResearch(
       {
@@ -243,7 +247,7 @@ const queue = createJobQueue({
         quiet: true,
       },
       {
-        openCorpus: (path) => openSqliteCorpus({ path }),
+        openCorpus: runCorpusOpener(postgres),
         resolveSubject,
         makeSource,
         makeAdSource,
