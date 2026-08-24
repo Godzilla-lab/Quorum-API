@@ -86,7 +86,13 @@ export interface ExpandOptions {
     => Promise<{ ok: boolean; status: number; body: string; error?: string }>;
 }
 
-const WORTH_FAILING_OVER = new Set([402, 403, 408, 429, 500, 502, 503, 504]);
+/*
+ * 404 is in the list because the free pool drifts: on 2026-08-24 the first
+ * model in EXPANSION_MODELS had been withdrawn from OpenRouter and every
+ * expansion died on the first rung instead of trying the next. A model that
+ * no longer exists is exactly the case the chain exists for.
+ */
+const WORTH_FAILING_OVER = new Set([402, 403, 404, 408, 429, 500, 502, 503, 504]);
 
 /* Bounded hard. A model asked for three items will sometimes offer twelve, and
  * every extra brand is a real request to a stranger's host. */

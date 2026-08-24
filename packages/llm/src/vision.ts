@@ -77,8 +77,9 @@ export const VISION_MODELS = [
 export const DEFAULT_VISION_MODEL = VISION_MODELS[0];
 
 /* Worth trying the next model for. A 400 is our mistake and retrying it just
- * burns the list. */
-const WORTH_FAILING_OVER = new Set([402, 403, 408, 429, 500, 502, 503, 504]);
+ * burns the list. 404 is a model withdrawn from the pool, seen live 2026-08-24
+ * on the first model in this very list; the next rung is the whole point. */
+const WORTH_FAILING_OVER = new Set([402, 403, 404, 408, 429, 500, 502, 503, 504]);
 const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 export type ReadingKind = 'transcription' | 'description';

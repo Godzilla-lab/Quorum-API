@@ -96,6 +96,24 @@ test('declining to guess is a valid answer and is not an error', () => {
   assert.equal(restrained.category, 'running shoe');
 });
 
+/*
+ * Seen live 2026-08-24: the first model in the pool had been withdrawn from
+ * OpenRouter, every expansion returned "status 404", and the chain never got
+ * to models that worked. A missing model is pool drift, not our mistake.
+ */
+test('a withdrawn model falls over to the next instead of ending the chain', async () => {
+  const tried: string[] = [];
+  const result = await expandSubject('x', ENV, deps({
+    post: async (_u, init) => {
+      tried.push((JSON.parse(init.body) as { model: string }).model);
+      if (tried.length === 1) return { ok: false, status: 404, body: '' };
+      return { ok: true, status: 200, body: reply('{"brands":[],"category":"shoe","aliases":[]}') };
+    },
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(tried.length, 2, 'the second model was tried');
+});
+
 test('a rate limited model falls over, and the answer names who gave it', async () => {
   const tried: string[] = [];
   const result = await expandSubject('x', ENV, deps({
