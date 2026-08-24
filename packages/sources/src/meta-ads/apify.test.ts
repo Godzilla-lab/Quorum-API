@@ -131,6 +131,30 @@ test('unconfigured without a token, and it does not throw', () => {
   assert.equal(source.configured({ APIFY_TOKEN: 'x' }), true);
 });
 
+/*
+ * Found live on the hosted instance 2026-08-24: a token pasted into a
+ * dashboard carries a trailing newline, and the untrimmed value killed the
+ * query at header construction with "Invalid character in header content".
+ * Same incident class as the OPENROUTER_API_KEY trim in the llm package.
+ */
+test('a pasted token with a trailing newline still builds a clean header', async () => {
+  let sentAuth = '';
+  const source = createMetaAdsApifySource({
+    fetch: async (_url, opts) => {
+      sentAuth = (opts?.headers as Record<string, string>)?.['authorization'] ?? '';
+      return okFetch(ADS)();
+    },
+    now: () => CAPTURED_AT,
+  });
+  await source.plan({ category: 'running shoes', productTitle: 'running shoes', productUrl: '', terms: [] });
+  const c = ctx({ env: { APIFY_TOKEN: 'test-token\n' } });
+  const out = [];
+  for await (const r of source.retrieve({ text: 'running shoes' }, c)) out.push(r);
+
+  assert.equal(sentAuth, 'Bearer test-token', 'the newline never reaches the header');
+  assert.ok(out.length > 0, 'the dirty paste costs nothing: the call still happens');
+});
+
 test('every ad the vendor returned charges the meter, including ones we then drop', async () => {
   const source = createMetaAdsApifySource({ fetch: okFetch(ADS), now: () => CAPTURED_AT });
   await source.plan({ category: 'running shoes', productTitle: 'running shoes', productUrl: '', terms: [] });
