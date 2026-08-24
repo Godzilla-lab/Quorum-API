@@ -37,13 +37,28 @@ export interface VerdictAd {
    * carries it.
    */
   adId?: string;
+  /* Who is paying for it. Optional for the same reason as adId; a real run
+   * carries it, and the confidence rules below read it. */
+  advertiser?: string;
 }
 
 export interface Share { video: number; static: number; total: number; videoShare: number | null }
 
 export interface FormatVerdict {
   network: string;
-  sample: { ads: number; typed: number; untyped: number; dated: number; past60: number; past90: number };
+  sample: {
+    ads: number; typed: number; untyped: number; dated: number; past60: number; past90: number;
+    /*
+     * Distinct advertisers in the deciding cohort, and how its durations were
+     * established. Added 2026-08-24 because both were invisible: one company
+     * running thirty long lived video ads produced "video, strong" from a
+     * single media buy, and a cohort whose durations were mostly our own
+     * observation spans partly measures our polling cadence against a pool
+     * Meta only keeps while ads are live. The confidence rules read both.
+     */
+    advertisers: number;
+    basis: { reported: number; observed: number };
+  };
   raw: Share;
   longRunners: Share & { cohortDays: number };
   durationWeighted: { videoDays: number; staticDays: number; videoShare: number | null };
@@ -124,6 +139,14 @@ export function formatVerdict(ads: VerdictAd[], options: FormatVerdictOptions = 
   }
   const weightTotal = weight.video + weight.static;
 
+  const cohortAdvertisers = new Set(
+    cohort.map((a) => a.advertiser?.trim()).filter((name): name is string => Boolean(name)),
+  );
+  const basis = {
+    reported: cohort.filter((a) => a.durationConfidence === 'reported').length,
+    observed: cohort.filter((a) => a.durationConfidence === 'observed').length,
+  };
+
   const out: FormatVerdict = {
     network,
     sample: {
@@ -133,6 +156,8 @@ export function formatVerdict(ads: VerdictAd[], options: FormatVerdictOptions = 
       dated: dated.length,
       past60: past60.length,
       past90: past90.length,
+      advertisers: cohortAdvertisers.size,
+      basis,
     },
     raw: share(typed),
     longRunners: { ...share(cohort), cohortDays },
@@ -156,6 +181,24 @@ export function formatVerdict(ads: VerdictAd[], options: FormatVerdictOptions = 
     return out;
   }
 
+  /*
+   * UNTYPED ADS LEAVING SILENTLY WAS THE ORIGINAL SIN OF THIS MODULE: reading
+   * `displayFormat` threw away 23 of 30 real ads and the ratio over the
+   * survivors was reported with a straight face. Excluding untypeable ads is
+   * still right, and above this share the survivors stop being a sample of
+   * the pool: if the network shifts to a creative shape the media keys do not
+   * cover, the ratio silently becomes a ratio of the leftovers. 0.4 is a
+   * guardrail chosen 2026-08-24, not a measured constant; the honest failure
+   * is a named refusal either way.
+   */
+  const untypedShare = pool.length ? out.sample.untyped / pool.length : 0;
+  if (untypedShare > 0.4) {
+    out.reason =
+      `${out.sample.untyped} of ${pool.length} ads here have no readable creative type, ` +
+      'so a ratio over the rest would describe the readable minority rather than the market';
+    return out;
+  }
+
   const s = out.longRunners.videoShare;
   if (s === null) {
     out.reason = 'no long running ads with a known creative type';
@@ -169,10 +212,29 @@ export function formatVerdict(ads: VerdictAd[], options: FormatVerdictOptions = 
    */
   out.verdict = s >= 0.65 ? 'video' : s <= 0.35 ? 'static' : 'both';
 
-  /* Confidence is how hard the evidence leans and how much of it there is. */
+  /*
+   * Confidence is how hard the evidence leans, how much of it there is, and
+   * WHOSE conviction it represents.
+   *
+   * A single advertiser running thirty long lived video ads used to produce
+   * "video, strong": one company's media buy presented as a market pattern.
+   * And a cohort whose durations are mostly observation spans is partly a
+   * measurement of our own polling cadence, because spans only accrue when a
+   * category is re-run, on ads the network only keeps while they are live.
+   * Neither degrades the verdict itself, the arithmetic is what it is; both
+   * cap how confidently it is stated. A cohort with NO advertiser names at
+   * all is unknown rather than singular, so it is not punished: arithmetic
+   * callers construct ads without them.
+   */
   const margin = Math.abs(s - 0.5) * 2;
-  if (typed.length >= 40 && out.longRunners.total >= 15 && margin >= 0.3) out.confidence = 'strong';
-  else if (out.longRunners.total >= minLong && margin >= 0.15) out.confidence = 'moderate';
+  const advertiserBreadth = cohortAdvertisers.size === 0 ? null : cohortAdvertisers.size;
+  const selfObservedMajority = basis.observed > basis.reported;
+  if (
+    typed.length >= 40 && out.longRunners.total >= 15 && margin >= 0.3
+    && (advertiserBreadth === null || advertiserBreadth >= 3)
+    && !selfObservedMajority
+  ) out.confidence = 'strong';
+  else if (out.longRunners.total >= minLong && margin >= 0.15 && advertiserBreadth !== 1) out.confidence = 'moderate';
   else out.confidence = 'thin';
 
   const pct = Math.round(s * 100);

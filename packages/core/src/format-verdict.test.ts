@@ -92,6 +92,56 @@ test('duration weighting counts a 200 day ad as 200 times a one day ad', () => {
   assert.equal(v.durationWeighted.videoShare, 2000 / 2020);
 });
 
+/*
+ * One company's media buy is not a market pattern. Thirty long lived video
+ * ads from a single advertiser used to print "video, strong".
+ */
+test('a single advertiser cohort caps at thin, however loud it is', () => {
+  const v = formatVerdict([
+    ...many(45, { creative: 'video', daysRunning: 150, advertiser: 'MegaCorp' }),
+    ...many(5, { creative: 'static', daysRunning: 150, advertiser: 'MegaCorp' }),
+  ]);
+  assert.equal(v.verdict, 'video', 'the arithmetic is what it is');
+  assert.equal(v.confidence, 'thin', 'but one company cannot state it strongly');
+  assert.equal(v.sample.advertisers, 1);
+});
+
+test('breadth of advertisers restores the confidence the arithmetic earns', () => {
+  const v = formatVerdict([
+    ...many(15, { creative: 'video', daysRunning: 150, advertiser: 'Alpha' }),
+    ...many(15, { creative: 'video', daysRunning: 150, advertiser: 'Beta' }),
+    ...many(15, { creative: 'video', daysRunning: 150, advertiser: 'Gamma' }),
+    ...many(5, { creative: 'static', daysRunning: 150, advertiser: 'Delta' }),
+  ]);
+  assert.equal(v.confidence, 'strong');
+  assert.equal(v.sample.advertisers, 4);
+});
+
+/*
+ * Observation span durations accrue only when WE re-run a category, on ads
+ * the network keeps only while they run. A cohort mostly made of them partly
+ * measures our own polling cadence, and that must not read as strong.
+ */
+test('a cohort of mostly self observed durations cannot be strong', () => {
+  const v = formatVerdict([
+    ...many(35, { creative: 'video', daysRunning: 150, durationConfidence: 'observed' }),
+    ...many(10, { creative: 'video', daysRunning: 150, durationConfidence: 'reported' }),
+    ...many(5, { creative: 'static', daysRunning: 150 }),
+  ]);
+  assert.equal(v.verdict, 'video');
+  assert.notEqual(v.confidence, 'strong');
+  assert.equal(v.sample.basis.observed, 35);
+});
+
+test('a mostly untypeable pool refuses a verdict and says why', () => {
+  const v = formatVerdict([
+    ...many(30, { creative: 'video', daysRunning: 150 }),
+    ...many(25, { creative: null, durationConfidence: 'none', daysRunning: null }),
+  ]);
+  assert.equal(v.verdict, null);
+  assert.match(v.reason, /no readable creative type/);
+});
+
 test('confidence reflects how hard the evidence leans and how much there is', () => {
   const strong = formatVerdict([...many(45, { creative: 'video', daysRunning: 150 }), ...many(5, { creative: 'static', daysRunning: 150 })]);
   assert.equal(strong.confidence, 'strong');
