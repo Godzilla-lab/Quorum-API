@@ -244,7 +244,14 @@ export function createReceiptsServer(options: ServerOptions): Server {
    * default: an agent must not start minutes of retrieval by accident.
    */
   const mcpTools = createTools({ corpus });
-  const MCP_INFO = { name: 'quorum', version: '0.1.0' };
+  const MCP_INFO = {
+    name: 'quorum',
+    version: '0.1.0',
+    instructions: 'Market evidence with receipts. Search what buyers actually said, resolve any '
+      + 'receipt id back to the real record behind it, and check a category\'s warmth before '
+      + 'asking for a report. Every claim these tools return can be independently verified: '
+      + 'an id that does not resolve was never real.',
+  };
 
   /*
    * How long to wait before polling again. Honoured or not, it has to be said:

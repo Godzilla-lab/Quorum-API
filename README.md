@@ -700,6 +700,8 @@ recording on the day.
 | | |
 |---|---|
 | [`spec/openapi.yaml`](spec/openapi.yaml) | The API contract. The SDK is written against it |
+| [`docs/citation-integrity.md`](docs/citation-integrity.md) | Measured fabrication rates elsewhere, and the structure that makes them impossible here |
+| [`docs/gummysearch-alternative.md`](docs/gummysearch-alternative.md) | For GummySearch users: the overlap, the differences, and what this is not |
 | [`docs/postgres.md`](docs/postgres.md) | Running on Postgres, and what was found verifying it |
 | [`docs/rate-limits.md`](docs/rate-limits.md) | Every upstream, what it does when pushed, and what we do about it |
 | [`bench/README.md`](bench/README.md) | Load and abuse testing, with the defects it found |

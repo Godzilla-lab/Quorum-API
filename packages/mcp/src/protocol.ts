@@ -61,6 +61,12 @@ interface Request {
 export interface ServerInfo {
   name: string;
   version: string;
+  /*
+   * Optional. Sent as the spec's `instructions` field on initialize, which
+   * clients surface as the server's description. One or two sentences a model
+   * or a person reads before deciding whether to use these tools.
+   */
+  instructions?: string;
 }
 
 const ok = (id: string | number | null, result: unknown) => ({ jsonrpc: '2.0', id, result });
@@ -107,7 +113,8 @@ export async function handleMessage(
         protocolVersion: SUPPORTED_VERSIONS.has(asked) ? asked : PROTOCOL_VERSION,
         /* Tools only, stated honestly. See the header. */
         capabilities: { tools: {} },
-        serverInfo: info,
+        serverInfo: { name: info.name, version: info.version },
+        ...(info.instructions ? { instructions: info.instructions } : {}),
       });
     }
 
