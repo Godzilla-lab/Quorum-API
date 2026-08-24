@@ -211,7 +211,14 @@ export function createMetaAdsApifySource(options: MetaAdsApifyOptions = {}): AdS
     },
 
     async *retrieve(query: AdQuery, ctx: Ctx): AsyncIterable<AdRecord> {
-      const token = ctx.env['APIFY_TOKEN'];
+      /*
+       * Trimmed because a pasted key carries a newline. The third key to fail
+       * this exact way: OPENROUTER_API_KEY died at the authorization header on
+       * 2026-08-24 and got its trim, and the hosted ads leg then failed
+       * identically the same day with "Invalid character in header content"
+       * from a trailing character on Render's APIFY_TOKEN.
+       */
+      const token = ctx.env['APIFY_TOKEN']?.trim();
       if (!token) return;
 
       const wanted = query.limit ?? limit;
