@@ -292,6 +292,48 @@ export function runConformanceSuite(
     });
   });
 
+  test(`${driverName}: the category listing is the discovery path, most records first`, async () => {
+    await withCorpus(async (c) => {
+      assert.deepEqual(await c.listCategories(), [], 'an empty corpus lists nothing rather than erroring');
+
+      await c.addDocs([
+        doc({ externalId: 'a1', channel: 'running' }),
+        doc({ externalId: 'a2', channel: 'trailrunning' }),
+      ], 'running shoes');
+      await c.addDocs([doc({ externalId: 'b1', channel: 'espresso' })], 'espresso machines');
+
+      const listed = await c.listCategories();
+      assert.deepEqual(listed.map((l) => l.category), ['running shoes', 'espresso machines']);
+      const shoes = listed[0]!;
+      assert.equal(shoes.docs, 2);
+      assert.equal(shoes.channels, 2);
+      assert.ok(shoes.lastHarvested > 0);
+      assert.equal(typeof shoes.warm, 'boolean');
+    });
+  });
+
+  /*
+   * Measured live 2026-08-24 by an outside tester: "Running Shoes" answered
+   * with the cold run message while "running shoes" held 2,452 records,
+   * because category identity was the raw string. One spelling everywhere,
+   * write path and read path, both drivers.
+   */
+  test(`${driverName}: CATEGORY CASE AND WHITESPACE ARE NOT IDENTITY`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: 'n1' })], '  Running   Shoes ');
+
+      assert.equal((await c.categoryStats('running shoes')).docs, 1,
+        'a write under a shouty spelling lands in the one true category');
+      assert.equal((await c.categoryStats('RUNNING SHOES')).docs, 1,
+        'a read under a shouty spelling finds it');
+      assert.equal((await c.byCategory('Running Shoes')).length, 1);
+      const hits = await c.search('shoes', { category: 'Running Shoes' });
+      assert.equal(hits.length, 1, 'the search category filter folds the same way');
+      assert.deepEqual((await c.listCategories()).map((l) => l.category), ['running shoes'],
+        'the listing never shows a second, invisible spelling');
+    });
+  });
+
   /*
    * MARCH 2024 and APRIL 2024, chosen because they are far from any boundary a
    * timezone could push a record across. A histogram test dated to the first of

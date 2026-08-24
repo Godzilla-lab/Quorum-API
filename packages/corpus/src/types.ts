@@ -151,6 +151,22 @@ export interface CategoryStats {
   queries: string[];
 }
 
+/*
+ * One row of the category index: what is held, how spread, how fresh. The
+ * discovery answer for a caller who does not already know the slug, which
+ * until 2026-08-24 had no way to exist: an outside tester guessed five
+ * categories, four returned nothing, and nothing is indistinguishable from
+ * the service being broken.
+ */
+export interface CategoryListing {
+  category: string;
+  docs: number;
+  channels: number;
+  lastHarvested: number;
+  ageDays: number | null;
+  warm: boolean;
+}
+
 export interface ReportInput {
   productUrl: string;
   productTitle?: string;

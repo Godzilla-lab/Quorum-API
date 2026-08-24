@@ -18,7 +18,7 @@ import type { CorpusDriver } from '../driver.ts';
 import { SQLITE_SCHEMA } from '../schema.ts';
 import { receiptId } from '../receipt-id.ts';
 import { toFts5Query, toFts5QueryStrict } from '../terms.ts';
-import { storableText } from '../text.ts';
+import { normaliseCategory, storableText } from '../text.ts';
 import { FUTURE_TOLERANCE_SECONDS, MIN_CREATED_UTC, WARM_MAX_AGE_DAYS, WARM_MIN_DOCS, ageInDays, isWarm } from '../constants.ts';
 import type {
   AdObservation,
@@ -27,6 +27,7 @@ import type {
   WebhookDelivery,
   WebhookDeliveryInput,
   ByCategoryOptions,
+  CategoryListing,
   CategoryStats,
   DateHistogram,
   DateHistogramOptions,
@@ -243,6 +244,9 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
   return {
     async addDocs(docs: DocInput[], category: string): Promise<number> {
       if (!docs.length) return 0;
+      /* One spelling per category, on the write path and every read below,
+       * so "Running Shoes" can never become a second, invisible corpus. */
+      category = normaliseCategory(category);
       const harvestedAt = nowSeconds();
       let added = 0;
       db.exec('BEGIN');
@@ -285,7 +289,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
 
       const where = ['docs_fts MATCH ?'];
       const args: (string | number)[] = [];
-      if (category) { where.push('d.category = ?'); args.push(category); }
+      if (category) { where.push('d.category = ?'); args.push(normaliseCategory(category)); }
       if (source) { where.push('d.source = ?'); args.push(source); }
       if (minScore != null) { where.push('d.score >= ?'); args.push(minScore); }
       /* An as-of window. A record with no usable date is EXCLUDED rather than
@@ -359,7 +363,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       } = options;
 
       const where = ['d.category = ?'];
-      const args: (string | number)[] = [category];
+      const args: (string | number)[] = [normaliseCategory(category)];
       let joins = false;
       if (query !== undefined) {
         const match = ftsQuery(query);
@@ -401,7 +405,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
     async byCategory(category: string, options: ByCategoryOptions = {}): Promise<Doc[]> {
       const { limit = 400, kind = null, from, until } = options;
       const where = ['category = ?'];
-      const args: (string | number)[] = [category];
+      const args: (string | number)[] = [normaliseCategory(category)];
       if (kind) { where.push('kind = ?'); args.push(kind); }
       if (from != null) { where.push('created_utc >= ?'); args.push(from); }
       if (until != null) { where.push('created_utc <= ? AND created_utc > 0'); args.push(until); }
@@ -444,6 +448,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
     },
 
     async categoryStats(category: string): Promise<CategoryStats> {
+      category = normaliseCategory(category);
       const row = db.prepare(`
         SELECT COUNT(*) AS docs,
                SUM(CASE WHEN kind = 'comment' THEN 1 ELSE 0 END) AS comments,
@@ -483,7 +488,36 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       };
     },
 
+    async listCategories(): Promise<CategoryListing[]> {
+      const rows = db.prepare(`
+        SELECT category,
+               COUNT(*) AS docs,
+               COUNT(DISTINCT channel) AS channels,
+               MAX(harvested_at) AS last_harvested
+        FROM docs
+        GROUP BY category
+        ORDER BY docs DESC, category ASC
+      `).all() as unknown as {
+        category: string; docs: number; channels: number; last_harvested: number | null;
+      }[];
+
+      const now = nowSeconds();
+      return rows.map((r) => {
+        const lastHarvested = r.last_harvested ?? 0;
+        const age = ageInDays(lastHarvested, now);
+        return {
+          category: r.category,
+          docs: Number(r.docs),
+          channels: Number(r.channels),
+          lastHarvested,
+          ageDays: age,
+          warm: isWarm(Number(r.docs), age),
+        };
+      });
+    },
+
     async rememberCategory(category, plan): Promise<void> {
+      category = normaliseCategory(category);
       const ts = nowSeconds();
       db.prepare(`
         INSERT INTO categories (name, first_seen, last_harvested, subreddits, queries)
@@ -506,7 +540,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
           insertAdObservation.run(
             storableText(o.adId),
             storableText(o.advertiser ?? ''),
-            storableText(o.category),
+            normaliseCategory(storableText(o.category)),
             storableText(o.body ?? ''),
             storableText(o.cta ?? ''),
             storableText(o.url ?? ''),
@@ -556,7 +590,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
         )
         ORDER BY days_running DESC
         LIMIT ?
-      `).all(category, limit) as unknown as AdRow[];
+      `).all(normaliseCategory(category), limit) as unknown as AdRow[];
       return rows.map(toAdObservation);
     },
 
@@ -568,7 +602,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
         report.tenantId ?? null,
         report.productUrl,
         report.productTitle ?? '',
-        report.category,
+        normaliseCategory(report.category),
         report.markdown,
         JSON.stringify(report.findings ?? {}),
         report.costUsd ?? 0,
@@ -584,7 +618,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
         FROM reports
         WHERE category = ? AND tenant_id IS NOT DISTINCT FROM ?
         ORDER BY created_at DESC LIMIT ?
-      `).all(category, tenantId ?? null, limit) as unknown as {
+      `).all(normaliseCategory(category), tenantId ?? null, limit) as unknown as {
         product_title: string | null; product_url: string;
         findings: string | null; created_at: number;
       }[];
@@ -775,7 +809,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       `).run(
         facts.url,
         facts.title ?? '',
-        category,
+        normaliseCategory(category),
         JSON.stringify(facts),
         facts.source ?? '',
         nowSeconds(),

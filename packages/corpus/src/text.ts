@@ -28,3 +28,21 @@
  * side of it into one that nobody wrote.
  */
 export const storableText = (value: string): string => value.replace(/\u0000/g, ' ');
+
+/*
+ * The one spelling of a category, shared by every driver on both the write
+ * and the read path.
+ *
+ * MEASURED LIVE 2026-08-24 by an outside tester: "running shoes" answered
+ * with 2,452 records while "Running Shoes" and "running shoe" answered with
+ * the cold run message, which is indistinguishable from the category not
+ * existing and invites a caller to pay minutes of throttled harvesting for
+ * data already held. Case and stray whitespace are not category identity.
+ *
+ * Case folding and whitespace only. Plural folding is deliberately absent:
+ * a stemmer that merges "glass" and "glasses" invents equivalences nobody
+ * asked for, and the category listing endpoint is the honest answer to a
+ * near miss.
+ */
+export const normaliseCategory = (value: string): string =>
+  value.toLowerCase().replace(/\s+/g, ' ').trim();

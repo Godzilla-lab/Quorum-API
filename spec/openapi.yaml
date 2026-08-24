@@ -437,6 +437,47 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '429': { $ref: '#/components/responses/RateLimited' }
 
+  /categories:
+    get:
+      operationId: listCategories
+      tags: [categories]
+      summary: Every category the corpus holds, most records first
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+      description: |
+        The discovery path. A caller who does not already know a slug lists
+        what the instance can answer well instead of guessing: a guessed
+        category that returns nothing is indistinguishable from the service
+        being broken, and that is exactly how an early evaluator read it.
+        Categories are one spelling only, lowercased with collapsed
+        whitespace, and every category endpoint folds its input the same way.
+      responses:
+        '200':
+          description: Categories with counts, freshness and the warm flag.
+          headers:
+            Cache-Control:
+              schema: { type: string }
+              description: 'public, max-age=60. Warmth moves slowly.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [categories, total, nextOffset]
+                properties:
+                  categories:
+                    type: array
+                    items: { $ref: '#/components/schemas/CategoryListing' }
+                  total: { type: integer }
+                  nextOffset:
+                    type: [integer, 'null']
+                    description: Null when this page is the last.
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /categories/{slug}:
     parameters:
       - name: slug
@@ -1164,6 +1205,22 @@ components:
         none:
           type: integer
           description: No evidenced date. Shows no duration at all rather than a guess.
+
+    CategoryListing:
+      type: object
+      required: [category, docs, channels, lastHarvested, ageDays, warm]
+      properties:
+        category: { type: string }
+        docs: { type: integer }
+        channels: { type: integer }
+        lastHarvested:
+          type: integer
+          description: Unix seconds of the newest harvest.
+        ageDays:
+          type: [number, 'null']
+        warm:
+          type: boolean
+          description: Same two conditions as CategoryStats, computed by the same module.
 
     CategoryStats:
       type: object

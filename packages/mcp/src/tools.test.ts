@@ -139,6 +139,30 @@ test('the record count is bounded, so a search cannot flood a context window', a
   await corpus.close();
 });
 
+test('THE VERDICT IS INVARIANT UNDER ANYTHING THE CALLER SENDS BESIDE THE QUERY', async () => {
+  /*
+   * Measured live by an outside tester, 2026-08-24: the retired `limit`
+   * parameter fed the corroboration scan, so `limit: 2` printed "weak signal"
+   * and `limit: 3` printed "finding" on the identical query and corpus. The
+   * count is the product. A caller must not be able to move it, and a caller
+   * still sending the old parameter must be ignored rather than errored.
+   */
+  const { call, corpus } = await tools();
+  const outputs = await Promise.all([
+    call('search_evidence', { query: 'sizing', category: 'running shoes' }),
+    call('search_evidence', { query: 'sizing', category: 'running shoes', limit: 2 }),
+    call('search_evidence', { query: 'sizing', category: 'running shoes', limit: 3 }),
+    call('search_evidence', { query: 'sizing', category: 'running shoes', limit: 500 }),
+  ]);
+  const verdictLines = outputs.map((o) => o.split('\n').find((l) => l.startsWith('**'))!);
+  for (const line of verdictLines) {
+    assert.equal(line, verdictLines[0], 'the verdict moved with a parameter that is not the query');
+  }
+  assert.match(verdictLines[0]!, /Finding/);
+  assert.match(verdictLines[0]!, /3 independent records/);
+  await corpus.close();
+});
+
 /* ------------------------------------------------------------------ */
 /* get_receipt, the tool the whole pitch rests on                      */
 /* ------------------------------------------------------------------ */
@@ -190,10 +214,41 @@ test('warmth tells an agent whether asking is cheap before it asks', async () =>
   const { call, corpus } = await tools();
   const held = await call('category_warmth', { category: 'running shoes' });
   assert.match(held, /4 records across 3 channels/);
+  /* Warmth never implied ads, and now it says so instead of letting a caller
+   * spend a compare_formats call to find out. */
+  assert.match(held, /No ads held/);
 
   const empty = await call('category_warmth', { category: 'garden hoses' });
   assert.match(empty, /Nothing held/);
   assert.match(empty, /minutes of throttled retrieval/);
+  await corpus.close();
+});
+
+test('WITH NO CATEGORY, WARMTH LISTS WHAT EXISTS INSTEAD OF MAKING A CALLER GUESS', async () => {
+  /* Measured on the live instance 2026-08-24: an outside tester guessed five
+   * categories, four returned nothing, and nothing reads as broken. */
+  const { call, corpus } = await tools();
+  const out = await call('category_warmth', {});
+  assert.match(out, /Categories held/);
+  assert.match(out, /running shoes: 4 records, 3 channels/);
+  await corpus.close();
+});
+
+test('A LONG RECORD TRUNCATES WITH NOTICE, AND full RETURNS EVERY CHARACTER', async () => {
+  /* The bound search_evidence always had and get_receipt lacked: resolving
+   * three dump ids once returned an entire scraped race site. */
+  const { call, corpus } = await tools();
+  const long = `the sizing story starts here ${'and the details continue at length '.repeat(120)}`;
+  await corpus.addDocs([doc(long, 'r/ultrarunning')], 'running shoes');
+  const [hit] = await corpus.search('sizing story', { limit: 1 });
+
+  const bounded = await call('get_receipt', { receiptIds: [hit!.receiptId] });
+  assert.match(bounded, /\[truncated: \d+ more characters\. Pass full: true to read everything\.\]/);
+  assert.ok(!bounded.includes(long), 'the full text must not leak past the bound');
+
+  const complete = await call('get_receipt', { receiptIds: [hit!.receiptId], full: true });
+  assert.ok(complete.includes(long.replace(/\s+/g, ' ').trim()), 'full: true returns the whole record');
+  assert.doesNotMatch(complete, /truncated:/);
   await corpus.close();
 });
 

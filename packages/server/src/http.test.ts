@@ -100,6 +100,30 @@ test('a real receipt resolves, with its tier and what its score means', async ()
   } finally { await s.close(); }
 });
 
+test('the category index lists what is held, so nobody has to guess slugs', async () => {
+  const s = await live();
+  try {
+    const res = await fetch(`${s.base}/v1/categories`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      categories: { category: string; docs: number; channels: number; warm: boolean }[];
+      total: number; nextOffset: number | null;
+    };
+    assert.equal(body.total, 1);
+    assert.equal(body.nextOffset, null);
+    assert.equal(body.categories[0]!.category, 'shoes');
+    assert.equal(body.categories[0]!.docs, 2);
+    assert.equal(typeof body.categories[0]!.warm, 'boolean');
+
+    /* And the slug route still answers, unswallowed by the collection. */
+    const slug = await fetch(`${s.base}/v1/categories/shoes`);
+    assert.equal(slug.status, 200);
+    /* Case is not identity: the shouty spelling reaches the same category. */
+    const shouty = await fetch(`${s.base}/v1/categories/SHOES`);
+    assert.equal(((await shouty.json()) as { docs: number }).docs, 2);
+  } finally { await s.close(); }
+});
+
 /*
  * These two are different answers and collapsing them would be a lie in the one
  * place this product cannot afford one.

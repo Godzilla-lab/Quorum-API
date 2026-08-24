@@ -13,7 +13,7 @@ rather than a README asserting it.
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/quorum-api.svg)](https://www.npmjs.com/package/quorum-api)
-[![Tests](https://img.shields.io/badge/tests-1%2C208-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1%2C216-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
 
@@ -98,18 +98,18 @@ past.
   identically forever, including after the source deletes the original.
 - **Corroboration as arithmetic.** A claim needs at least three independent
   records before it prints as a finding, and the count travels with it.
-- **Nine sources behind one interface**, from a volunteer Reddit archive to four
-  government safety regulators, each degrading rather than failing when
-  unconfigured.
+- **Ten sources behind one interface**, from a volunteer Reddit archive and
+  GitHub issue search to four government safety regulators, each degrading
+  rather than failing when unconfigured.
 - **A corpus that compounds.** Cold retrieval measured 596 seconds and about 500
   throttled requests. The same category answers in half a second once warm.
 - **Offline mode** that touches no network and costs nothing.
-- **Fourteen HTTP operations, a typed SDK, an MCP server and a CLI**, all the same
+- **Fifteen HTTP operations, a typed SDK, an MCP server and a CLI**, all the same
   pipeline.
 
 ### What it looks like
 
-Real output, from a corpus of 100,000 records:
+The shape of a run, illustrated. Ids and names below are stand-ins:
 
 ```
 EVIDENCE  a claim needs 3 independent receipts to be stated as a finding
@@ -128,8 +128,8 @@ VERSUS    alpha shoes against 1 rival
 RECEIPTS  47 cited, 47 resolved back to real records
 ```
 
-Every id in that output is fetchable. If an id does not resolve, the run exits
-non zero and says which one.
+In a real run every id in that output is fetchable. If an id does not resolve,
+the run exits non zero and says which one.
 
 ## Use cases
 
@@ -150,7 +150,7 @@ non zero and says which one.
 
 | | |
 |---|---|
-| **Engine** | Working. 1,208 tests, offline and keyless |
+| **Engine** | Working. 1,216 tests, offline and keyless |
 | **CLI** | Working, every flag |
 | **MCP server** | Working, five tools over stdio, four of them also remote at `/mcp` |
 | **JavaScript SDK** | Working, 11 methods |
@@ -223,7 +223,7 @@ Working on Quorum itself is the clone path:
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 1,208 tests, offline, no keys
+npm test          # 1,216 tests, offline, no keys
 ```
 
 Then research something. The input is a **subject**, not a URL. Plain text
@@ -739,7 +739,7 @@ npm run test:postgres  # the driver against a real server, needs QUORUM_PG_URL
 
 CI runs the test suite inside a network namespace with no route off the host, so
 an adapter that quietly reaches for the wire fails immediately instead of flaking
-later. Three of the 1,208 tests need a real PostgreSQL server and skip without
+later. Three of the 1,216 tests need a real PostgreSQL server and skip without
 `QUORUM_PG_URL`.
 
 ## License
@@ -758,6 +758,9 @@ This runs on archives other people maintain, most of them for free:
 - [Arctic Shift](https://github.com/ArthurHeitmann/arctic_shift), the public
   Reddit archive, which is a volunteer project and is treated as one
 - [Hacker News](https://hn.algolia.com/api) search
+- The [GitHub issue search API](https://docs.github.com/en/rest/search/search),
+  used keyless as documented, which is what puts filed defects with reaction
+  counts in tier B
 - The [Apple App Store](https://www.apple.com/app-store/) public review feeds
 - [CPSC](https://www.cpsc.gov/), [openFDA](https://open.fda.gov/),
   [NHTSA](https://www.nhtsa.gov/) and the

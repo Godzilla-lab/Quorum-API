@@ -27,7 +27,7 @@
 import type { CorpusDriver } from '../driver.ts';
 import { receiptId } from '../receipt-id.ts';
 import { toTsQuery, toTsQueryStrict } from '../terms.ts';
-import { storableText } from '../text.ts';
+import { normaliseCategory, storableText } from '../text.ts';
 import { FUTURE_TOLERANCE_SECONDS, MIN_CREATED_UTC, ageInDays, isWarm } from '../constants.ts';
 import type {
   AdObservation,
@@ -36,6 +36,7 @@ import type {
   WebhookDelivery,
   WebhookDeliveryInput,
   ByCategoryOptions,
+  CategoryListing,
   CategoryStats,
   DateHistogram,
   DateHistogramOptions,
@@ -197,6 +198,9 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
   return {
     async addDocs(docs: DocInput[], category: string): Promise<number> {
       if (!docs.length) return 0;
+      /* One spelling per category, on the write path and every read below,
+       * so "Running Shoes" can never become a second, invisible corpus. */
+      category = normaliseCategory(category);
       const harvestedAt = nowSeconds();
 
       /*
@@ -280,7 +284,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
 
       const where = ['d.text_tsv @@ to_tsquery(\'english\', $1)'];
       const params: unknown[] = [loose];
-      if (category) { params.push(category); where.push(`d.category = $${params.length}`); }
+      if (category) { params.push(normaliseCategory(category)); where.push(`d.category = $${params.length}`); }
       if (source) { params.push(source); where.push(`d.source = $${params.length}`); }
       if (minScore != null) { params.push(minScore); where.push(`d.score >= $${params.length}`); }
       /* Same window rule as the sqlite driver, and conformance asserts they
@@ -323,7 +327,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
         until = Math.floor(Date.now() / 1000) + FUTURE_TOLERANCE_SECONDS,
       } = options;
 
-      const params: unknown[] = [category];
+      const params: unknown[] = [normaliseCategory(category)];
       const where = ['d.category = $1'];
       if (query !== undefined) {
         const tsquery = toTsQuery(query);
@@ -363,7 +367,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
 
     async byCategory(category: string, options: ByCategoryOptions = {}): Promise<Doc[]> {
       const { limit = 400, kind = null, from, until } = options;
-      const params: unknown[] = [category];
+      const params: unknown[] = [normaliseCategory(category)];
       const where = ['category = $1'];
       if (kind) { params.push(kind); where.push(`kind = $${params.length}`); }
       if (from != null) { params.push(from); where.push(`created_utc >= $${params.length}`); }
@@ -396,6 +400,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
     },
 
     async categoryStats(category: string): Promise<CategoryStats> {
+      category = normaliseCategory(category);
       const [agg] = await sql.query<{
         docs: unknown; comments: unknown; channels: unknown; last_harvested: unknown;
       }>(
@@ -428,7 +433,37 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       };
     },
 
+    async listCategories(): Promise<CategoryListing[]> {
+      const rows = await sql.query<{
+        category: string; docs: unknown; channels: unknown; last_harvested: unknown;
+      }>(
+        `SELECT category,
+                COUNT(*) AS docs,
+                COUNT(DISTINCT channel) AS channels,
+                COALESCE(MAX(harvested_at), 0) AS last_harvested
+         FROM docs
+         GROUP BY category
+         ORDER BY docs DESC, category ASC`,
+        [],
+      );
+      const now = nowSeconds();
+      return rows.map((r) => {
+        const docs = num(r.docs);
+        const lastHarvested = num(r.last_harvested);
+        const age = ageInDays(lastHarvested, now);
+        return {
+          category: r.category,
+          docs,
+          channels: num(r.channels),
+          lastHarvested,
+          ageDays: age,
+          warm: isWarm(docs, age),
+        };
+      });
+    },
+
     async rememberCategory(category, plan): Promise<void> {
+      category = normaliseCategory(category);
       const ts = nowSeconds();
       await sql.query(
         `INSERT INTO categories (name, first_seen, last_harvested, subreddits, queries)
@@ -457,7 +492,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
                 start_date, end_date, is_active, days_running, duration_confidence, observed_at)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14)`,
             [
-              storableText(o.adId), storableText(o.advertiser ?? ''), storableText(o.category),
+              storableText(o.adId), storableText(o.advertiser ?? ''), normaliseCategory(storableText(o.category)),
               storableText(o.body ?? ''), storableText(o.cta ?? ''), storableText(o.url ?? ''),
               o.creative, JSON.stringify(o.platforms ?? []),
               o.startDate ?? null, o.endDate ?? null, o.isActive,
@@ -487,7 +522,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
          WHERE id IN (SELECT MAX(id) FROM ad_observations WHERE category = $1 GROUP BY ad_id)
          ORDER BY days_running DESC NULLS LAST
          LIMIT $2`,
-        [category, limit],
+        [normaliseCategory(category), limit],
       );
       return rows.map(toAdObservation);
     },
@@ -498,7 +533,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
          VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8)`,
         [
           report.tenantId ?? null, report.productUrl, report.productTitle ?? '',
-          report.category, report.markdown, JSON.stringify(report.findings ?? {}),
+          normaliseCategory(report.category), report.markdown, JSON.stringify(report.findings ?? {}),
           report.costUsd ?? 0, nowSeconds(),
         ],
       );
@@ -513,7 +548,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
          FROM reports
          WHERE category = $1 AND tenant_id IS NOT DISTINCT FROM $2
          ORDER BY created_at DESC LIMIT $3`,
-        [category, tenantId ?? null, limit],
+        [normaliseCategory(category), tenantId ?? null, limit],
       );
       return rows.map((r) => ({
         productTitle: r.product_title ?? '',
@@ -703,7 +738,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
          ON CONFLICT (url) DO UPDATE SET
            title = EXCLUDED.title, category = EXCLUDED.category,
            facts = EXCLUDED.facts, source = EXCLUDED.source, fetched_at = EXCLUDED.fetched_at`,
-        [facts.url, facts.title ?? '', category, JSON.stringify(facts), facts.source ?? '', nowSeconds()],
+        [facts.url, facts.title ?? '', normaliseCategory(category), JSON.stringify(facts), facts.source ?? '', nowSeconds()],
       );
     },
 

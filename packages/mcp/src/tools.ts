@@ -28,10 +28,30 @@ const QUOTED = 5;
  * more without a second search. */
 const LISTED_IDS = 20;
 
-const clampLimit = (value: unknown, fallback: number, max: number): number => {
-  const n = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback;
-  return Math.max(1, Math.min(max, n));
-};
+/*
+ * How many matches the corroboration count scans. FIXED, never caller
+ * supplied. Until 2026-08-24 the caller's `limit` parameter fed this scan, so
+ * the reported count was min(matches, limit) and the verdict flipped with a
+ * pagination knob: an outside tester measured limit 2 printing "weak signal"
+ * and limit 3 printing "finding" on the identical query and corpus. The count
+ * is the product, so the caller may choose how much to read but never how much
+ * gets counted. At exactly this many hits the count is reported as a floor
+ * ("at least"), because a scan that stops early can only undercount.
+ */
+const COUNT_SCAN = 500;
+
+/* How many categories the no-argument warmth listing prints. */
+const LISTED_CATEGORIES = 30;
+
+/*
+ * How much of one record `get_receipt` returns before truncating. The same
+ * budget discipline search_evidence applies to quotes, which this tool
+ * skipped until 2026-08-24: resolving three scraper-dump ids returned an
+ * entire race site's runner packet, thousands of words from one receipt.
+ * Truncation is always disclosed and `full: true` lifts it, so the audit
+ * path is intact and merely opt-in past this bound.
+ */
+const RECEIPT_CHARS = 2_000;
 
 const str = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
@@ -44,10 +64,14 @@ function quote(doc: Doc, maxChars = 240): string {
   return `> ${excerpt}\n> \n> \`${doc.receiptId}\` ${doc.source} ${doc.channel}`;
 }
 
-function corroborationLine(c: Corroboration): string {
+function corroborationLine(c: Corroboration, atLeast: boolean): string {
+  /* A full scan window means the true count may be higher, never lower, so
+   * the floor is stated in the output itself rather than left to a schema
+   * note nobody reads at answer time. */
+  const records = atLeast ? `at least ${c.records}` : `${c.records}`;
   return c.verdict === 'finding'
-    ? `**Finding.** ${c.records} independent records across ${c.channels} channels, threshold ${c.threshold}.`
-    : `**Weak signal, not a finding.** ${c.records} records across ${c.channels} channels, `
+    ? `**Finding.** ${records} independent records across ${c.channels} channels, threshold ${c.threshold}.`
+    : `**Weak signal, not a finding.** ${records} records across ${c.channels} channels, `
       + `and the threshold is ${c.threshold}. Do not state this as a market pattern.`;
 }
 
@@ -79,7 +103,6 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       properties: {
         query: { type: 'string', description: 'What to look for: "sizing", "battery life", "runs small".' },
         category: { type: 'string', description: 'Optional. Narrow to one product category.' },
-        limit: { type: 'number', description: 'Records to count over. Default 200, max 500.' },
       },
       required: ['query'],
     },
@@ -87,10 +110,11 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       const query = str(args['query']);
       if (!query) return 'No query given. Pass something to search for.';
       const category = str(args['category']);
-      const limit = clampLimit(args['limit'], 200, 500);
 
+      /* A caller sending the retired `limit` parameter is ignored, not
+       * errored: it must not be able to change the answer either way. */
       const hits = await corpus.search(query, {
-        limit,
+        limit: COUNT_SCAN,
         ...(category ? { category } : {}),
       });
 
@@ -109,7 +133,7 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       const out: string[] = [];
       out.push(`## ${query}${category ? ` in ${category}` : ''}`);
       out.push('');
-      out.push(corroborationLine(c));
+      out.push(corroborationLine(c, hits.length === COUNT_SCAN));
       out.push('');
       for (const doc of hits.slice(0, QUOTED)) {
         out.push(quote(doc));
@@ -133,7 +157,8 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
     annotations: { title: 'Resolve receipt ids', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       'Resolve receipt ids to the real records behind them. This is how you CHECK a claim: '
-      + 'if an id does not resolve, the claim citing it was not real. Takes one id or many.',
+      + 'if an id does not resolve, the claim citing it was not real. Takes one id or many. '
+      + 'Long records are truncated with notice; pass full: true for complete text.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -142,10 +167,15 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
           items: { type: 'string' },
           description: 'Receipt ids, as returned by any other tool. Up to 50.',
         },
+        full: {
+          type: 'boolean',
+          description: 'Return complete record text with no truncation. Default false.',
+        },
       },
       required: ['receiptIds'],
     },
     async run(args) {
+      const full = args['full'] === true;
       const raw = args['receiptIds'];
       const ids = (Array.isArray(raw) ? raw : [raw])
         .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
@@ -177,7 +207,16 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
         out.push(`### \`${doc.receiptId}\``);
         out.push(`${doc.source} / ${doc.channel} / ${when}${doc.url ? ` / ${doc.url}` : ''}`);
         out.push('');
-        out.push(doc.text.replace(/\s+/g, ' ').trim());
+        const text = doc.text.replace(/\s+/g, ' ').trim();
+        if (!full && text.length > RECEIPT_CHARS) {
+          out.push(text.slice(0, RECEIPT_CHARS));
+          /* Disclosed, never silent: the reader must know what it did not
+           * receive and how to get it. */
+          out.push('');
+          out.push(`[truncated: ${text.length - RECEIPT_CHARS} more characters. Pass full: true to read everything.]`);
+        } else {
+          out.push(text);
+        }
         out.push('');
       }
       return out.join('\n').trim();
@@ -189,25 +228,55 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
     annotations: { title: 'Check category warmth', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       'How much is already held for a category, and therefore whether asking about it is '
-      + 'instant and free or slow and expensive. Check this BEFORE starting a report.',
+      + 'instant and free or slow and expensive. Check this BEFORE starting a report. '
+      + 'With no category it lists what is held, so orient here instead of guessing slugs.',
     inputSchema: {
       type: 'object',
-      properties: { category: { type: 'string', description: 'The category, for example "running shoes".' } },
-      required: ['category'],
+      properties: {
+        category: {
+          type: 'string',
+          description: 'The category, for example "running shoes". Omit to list every held category.',
+        },
+      },
     },
     async run(args) {
       const category = str(args['category']);
-      if (!category) return 'No category given.';
+
+      /*
+       * THE DISCOVERY ANSWER. An outside tester guessed five categories,
+       * four returned nothing, and nothing reads as broken. A caller who
+       * does not know a slug must be able to ask what exists.
+       */
+      if (!category) {
+        const all = await corpus.listCategories();
+        if (!all.length) return 'The corpus holds no categories yet. The first report warms the first one.';
+        const out: string[] = ['## Categories held', ''];
+        for (const c of all.slice(0, LISTED_CATEGORIES)) {
+          const age = c.ageDays === null ? 'never harvested' : `${c.ageDays.toFixed(1)} days old`;
+          out.push(`- ${c.category}: ${c.docs} records, ${c.channels} channels, ${age}, ${c.warm ? 'warm' : 'cold'}`);
+        }
+        if (all.length > LISTED_CATEGORIES) out.push(`...and ${all.length - LISTED_CATEGORIES} more.`);
+        return out.join('\n');
+      }
+
       const stats = await corpus.categoryStats(category);
 
       if (!stats.docs) {
         return `Nothing held for ${JSON.stringify(category)}.\n\n`
           + 'A report on it would be a cold run: minutes of throttled retrieval against '
-          + 'upstream archives. Worth doing once, and instant every time after.';
+          + 'upstream archives. Worth doing once, and instant every time after. '
+          + 'Call this tool with no category to list what is already held.';
       }
       const age = stats.ageDays === null ? 'unknown age' : `last harvested ${stats.ageDays.toFixed(1)} days ago`;
+      /* Ads are their own leg and warmth never implied them: a warm category
+       * with no ads still answers compare_formats with nothing. Said here so
+       * a caller learns it before spending a call finding out. */
+      const ads = await corpus.latestAdsByCategory(category, 500);
+      const adsLine = ads.length
+        ? `${ads.length} distinct ads held, so compare_formats has material here.`
+        : 'No ads held: records cover conversation only, and compare_formats has nothing to compare yet.';
       return `## ${category}\n\n`
-        + `${stats.docs} records across ${stats.channels} channels, ${age}.\n\n`
+        + `${stats.docs} records across ${stats.channels} channels, ${age}. ${adsLine}\n\n`
         + (stats.warm
           ? '**Warm.** Answering from this costs no upstream requests and returns in well under a second.'
           : '**Cold.** Held records are usable, but a fresh report would retrieve again, '

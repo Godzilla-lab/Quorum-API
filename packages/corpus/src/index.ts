@@ -24,7 +24,7 @@ export type { SqliteCorpusOptions } from './drivers/sqlite.ts';
 export { openPostgresCorpus } from './drivers/postgres.ts';
 export type { PostgresCorpusOptions, SqlExecutor } from './drivers/postgres.ts';
 export { extractTerms, toFts5Query, toTsQuery } from './terms.ts';
-export { storableText } from './text.ts';
+export { normaliseCategory, storableText } from './text.ts';
 export { runConformanceSuite } from './conformance.ts';
 export type { TestClock } from './conformance.ts';
 export type { CorpusDriver } from './driver.ts';

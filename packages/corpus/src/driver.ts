@@ -23,6 +23,7 @@ import type {
   AdObservation,
   AdObservationInput,
   ByCategoryOptions,
+  CategoryListing,
   CategoryStats,
   CorpusTotals,
   Doc,
@@ -75,6 +76,15 @@ export interface CorpusDriver {
 
   /* The warm/cold decision, and what a caller checks before spending. */
   categoryStats(category: string): Promise<CategoryStats>;
+
+  /*
+   * Every category holding at least one record, most records first. The
+   * discovery path: a caller who does not know any slug orients here instead
+   * of guessing, and a guess that misses can be answered with what exists.
+   * Derived entirely from docs rows, so an empty corpus returns an empty
+   * list rather than an error.
+   */
+  listCategories(): Promise<CategoryListing[]>;
 
   /*
    * When records were written, bucketed by month.

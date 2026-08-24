@@ -615,6 +615,34 @@ export function createReceiptsServer(options: ServerOptions): Server {
       },
     },
 
+    /*
+     * The discovery path, declared BEFORE the slug route so the bare
+     * collection URL cannot be read as a slug. Until 2026-08-24 a caller had
+     * to already know a slug: an outside tester guessed five categories, four
+     * answered with nothing, and nothing is indistinguishable from the
+     * service being broken.
+     */
+    {
+      method: 'GET',
+      pattern: /^\/v1\/categories$/,
+      handler: async (ctx) => {
+        const all = await corpus.listCategories();
+        const limit = Math.min(Number(ctx.url.searchParams.get('limit')) || 100, 500);
+        const offset = Math.max(Number(ctx.url.searchParams.get('offset')) || 0, 0);
+        const page = all.slice(offset, offset + limit);
+        return {
+          status: 200,
+          headers: { 'cache-control': 'public, max-age=60' },
+          body: {
+            categories: page,
+            total: all.length,
+            /* Same bounded-response rule as evidence search. */
+            nextOffset: offset + page.length < all.length ? offset + page.length : null,
+          },
+        };
+      },
+    },
+
     {
       method: 'GET',
       pattern: /^\/v1\/categories\/(.+)$/,
