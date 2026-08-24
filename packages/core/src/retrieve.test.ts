@@ -89,6 +89,31 @@ test('a progress line never reports fewer stored than the corpus was given', asy
 });
 
 /*
+ * Counted, never gated on: a record stored on its container's word alone is
+ * tallied so a report can say what share of its evidence never names the
+ * subject itself. PLAN.category is "running shoes", so the vouching channel
+ * here is the handle "running".
+ */
+test('records that never name the subject are counted as channel vouched', async () => {
+  const corpus = freshCorpus();
+  const result = await retrieveAll({
+    sources: [makeSource('scoped', {
+      queries: [{ text: 'sizing' }],
+      records: () => [
+        record(1, { text: 'Same, had to size up half a size', channel: 'runningshoegeeks' }),
+        record(2, { text: 'these running shoes felt narrow after a week', channel: 'runningshoegeeks' }),
+      ],
+    })],
+    corpus, plan: PLAN, ctx: makeCtx(),
+  });
+
+  const scoped = result.outcomes.find((o) => o.sourceId === 'scoped')!;
+  assert.equal(scoped.recordsWritten, 2, 'both stored: the community vouches for the elliptical one');
+  assert.equal(scoped.recordsChannelVouched, 1, 'and exactly one of them never names the subject');
+  await corpus.close();
+});
+
+/*
  * THE LOAD BEARING RULE. A report missing one leg is still a good report.
  * Silently returning one that LOOKS complete is the failure worth engineering
  * against.

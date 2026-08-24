@@ -76,6 +76,20 @@ export interface SufficiencyInput {
 export const GATE_ALARM_PASS_RATE = 0.95;
 export const GATE_ALARM_MIN_SEEN = 200;
 
+/*
+ * The share of stored records that passed on their container's word alone
+ * above which the run is flagged. A healthy scoped community carries real
+ * elliptical evidence ("Same, had to size up" in a shoe subreddit), so a
+ * minority share is normal and a 0.5 threshold would cry wolf on dedicated
+ * communities whose members rarely repeat the subject. Near one, the
+ * container was doing all the work: the "love" failure stored reality TV
+ * chatter from communities that merely have love in their names, and next to
+ * none of it named the subject itself. 0.8 is chosen conservatively, not
+ * measured; revisit when the evals/ label sets are large enough to measure
+ * it, and record the measurement here when they are.
+ */
+export const CHANNEL_VOUCH_ALARM_SHARE = 0.8;
+
 export function assessSufficiency(input: SufficiencyInput): Sufficiency {
   const seen = input.retrieval?.totalSeen ?? 0;
   const rejected = input.retrieval?.outcomes.reduce((n, o) => n + o.recordsGated, 0) ?? 0;
@@ -89,6 +103,21 @@ export function assessSufficiency(input: SufficiencyInput): Sufficiency {
     );
     warnings.push(
       'the subject may be a single common word: communities matched by name can vouch for every record in them, so treat these findings with suspicion and name the product more specifically',
+    );
+  }
+
+  /*
+   * The second alarm on the same failure, from the other side. The pass rate
+   * says the gate rejected nothing; this says that of what was stored, almost
+   * none of it names the subject in its own words. Either alone can be
+   * innocent. A run where nearly everything was vouched for by its container
+   * is a run whose evidence is about whatever those containers are actually
+   * about, which on a one word subject is not the subject.
+   */
+  const vouched = input.retrieval?.outcomes.reduce((n, o) => n + (o.recordsChannelVouched ?? 0), 0) ?? 0;
+  if (stored >= GATE_ALARM_MIN_SEEN && vouched / stored > CHANNEL_VOUCH_ALARM_SHARE) {
+    warnings.push(
+      `${vouched} of ${stored} stored records never name the subject themselves and were vouched for by a community name or thread title, so the evidence may be about what those places discuss rather than the subject as asked`,
     );
   }
 

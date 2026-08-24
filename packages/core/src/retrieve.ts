@@ -26,7 +26,7 @@
 
 import type { CorpusDriver, DocInput } from '@quorum/corpus';
 import type { Ctx, PlanInput, Query, Source } from '@quorum/sources';
-import { isRelevantRecord, subjectTerms } from '@quorum/sources';
+import { isRelevantRecord, scoreText, subjectTerms } from '@quorum/sources';
 
 export interface SourceOutcome {
   sourceId: string;
@@ -38,6 +38,17 @@ export interface SourceOutcome {
   recordsSeen: number;
   recordsGated: number;
   recordsWritten: number;
+  /*
+   * Stored records whose TEXT carries no subject term at all: they passed on
+   * the strength of their container alone, a vouching subreddit name or an on
+   * topic thread title. A minority share is health, because "Same, had to
+   * size up" inside r/runningshoegeeks is exactly the voice this product
+   * exists to find. A share near one means the container was doing all the
+   * work, which on a one word subject is how a run on "love" stored 2544
+   * records of reality TV chatter from communities that merely have love in
+   * their names. Optional because older outcome literals predate it.
+   */
+  recordsChannelVouched?: number;
   elapsedMs: number;
 }
 
@@ -137,6 +148,7 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
       status: 'ok',
       queriesPlanned: 0, queriesRun: 0,
       recordsSeen: 0, recordsGated: 0, recordsWritten: 0,
+      recordsChannelVouched: 0,
       elapsedMs: 0,
     };
 
@@ -230,6 +242,17 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
           })) {
             outcome.recordsGated++;
             continue;
+          }
+
+          /*
+           * Counted, never gated on. Whether the record itself names the
+           * subject or its container vouched for it is the signal that tells
+           * a collapsed one word subject from a healthy scoped community, and
+           * it can only be judged as a share of the whole run. See the field's
+           * comment on SourceOutcome.
+           */
+          if (scoreText(record.text, subject).hits === 0) {
+            outcome.recordsChannelVouched = (outcome.recordsChannelVouched ?? 0) + 1;
           }
 
           batch.push(record);

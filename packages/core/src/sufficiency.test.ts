@@ -145,6 +145,30 @@ test('a small scoped run passing everything is health, not collapse', () => {
   assert.deepEqual(s.warnings, [], 'five for five from a regulator queried by name is fine');
 });
 
+test('a run where nearly everything was vouched for by its container is flagged', () => {
+  const claims = [corroborate('sizing', [doc('a'), doc('b'), doc('c')])];
+  const s = assessSufficiency({
+    retrieval: retrieval({
+      totalSeen: 400, totalWritten: 300,
+      outcomes: [outcome({ recordsSeen: 400, recordsWritten: 300, recordsChannelVouched: 280 })],
+    }),
+    claims, corpusRecords: 300, subjectResolved: false,
+  });
+  assert.match(s.warnings.join(' '), /never name the subject themselves/);
+});
+
+test('a healthy share of elliptical comments in scoped communities is not flagged', () => {
+  const claims = [corroborate('sizing', [doc('a'), doc('b'), doc('c')])];
+  const s = assessSufficiency({
+    retrieval: retrieval({
+      totalSeen: 500, totalWritten: 300,
+      outcomes: [outcome({ recordsSeen: 500, recordsWritten: 300, recordsChannelVouched: 120 })],
+    }),
+    claims, corpusRecords: 300, subjectResolved: true,
+  });
+  assert.deepEqual(s.warnings, [], '"Same, had to size up" inside a shoe community is the product working');
+});
+
 test('an offline run with a warm corpus is still assessed', () => {
   const s = assessSufficiency({
     retrieval: null,
