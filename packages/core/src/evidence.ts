@@ -24,6 +24,7 @@
 import type { Doc, EvidenceTier, SourceId } from '@quorum/corpus';
 import { scoreKindOf, tierOf, type ScoreKind } from '@quorum/corpus/tiers';
 import type { Corroboration } from './corroborate.ts';
+import { countVoices } from './voices.ts';
 
 /*
  * MEASURED 2026-08-22 across 2,373 real comments: p50 is 124 characters and
@@ -91,6 +92,17 @@ export interface ClaimWithEvidence extends Corroboration {
      * deciding for the reader.
      */
     singleChannelDominant: boolean;
+  };
+  /*
+   * The receipt count with near duplicate texts collapsed: the honest lower
+   * bound on how many people are talking. Reported next to the raw count and
+   * never gated on, for the parity reason given in voices.ts. Twenty five
+   * copies of one paragraph are twenty five receipts and one voice, and a
+   * reader deserves both numbers.
+   */
+  voices: {
+    independent: number;
+    collapsed: number;
   };
 }
 
@@ -191,5 +203,6 @@ export function withEvidence(
     ...claim,
     evidence: sampleEvidence(records, sampleSize),
     concentration: measureConcentration(records),
+    voices: countVoices(records),
   };
 }

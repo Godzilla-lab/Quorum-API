@@ -11,6 +11,7 @@ export * from "./retrieve-ads.ts";
 export * from "./synthesise.ts";
 export * from "./evidence.ts";
 export * from "./stance.ts";
+export * from "./voices.ts";
 export * from "./attested.ts";
 export * from "./product-reviews.ts";
 export * from "./divergence.ts";

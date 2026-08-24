@@ -324,6 +324,15 @@ export function renderText(result: RunResult): string {
           + ` come from ${claim.concentration.largestChannel}`,
         );
       }
+      /* Copypasta is receipts wearing one voice's words. The count above does
+       * not move, for the parity reason in voices.ts; the reader is told. */
+      if (claim.voices.collapsed > 0) {
+        out.push(
+          `         note: ${claim.voices.collapsed} receipt${claim.voices.collapsed === 1 ? '' : 's'} repeat`
+          + ` another's text nearly word for word, closer to ${claim.voices.independent}`
+          + ` voice${claim.voices.independent === 1 ? '' : 's'}`,
+        );
+      }
       out.push('');
     }
   }
