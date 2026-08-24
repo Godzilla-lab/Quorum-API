@@ -254,7 +254,12 @@ if (!PG_URL) {
        *      nothing, and a tenant table with RLS off matches everything. The
        *      second is the silent breach this file exists to prevent.
        */
-      const TENANT_OWNED = ['reports', 'webhook_deliveries'];
+      /* report_snapshots joined in migration 004: the exact bytes of a
+       * customer's finished report are customer work product by any reading.
+       * spend_ledger is deliberately NOT here: its key_label names who spent,
+       * but the rows are the operator's accounting against the operator's own
+       * vendor balance, and no caller facing endpoint reads them. */
+      const TENANT_OWNED = ['report_snapshots', 'reports', 'webhook_deliveries'];
 
       await t.test('the tenant owned tables are exactly the expected set', async () => {
         const rows = await tenant.query(
