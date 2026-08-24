@@ -159,6 +159,23 @@ test('help documents every flag the parser accepts', () => {
   }
 });
 
+test('takedown parses its pair and refuses half a request', () => {
+  const parsed = parseArgs(['takedown', 'reddit', 't1_abc', '--corpus', './x.db', '--json']);
+  assert.equal(parsed.ok, true);
+  if (parsed.ok && parsed.kind === 'takedown') {
+    assert.equal(parsed.options.source, 'reddit');
+    assert.equal(parsed.options.externalId, 't1_abc');
+    assert.equal(parsed.options.corpusPath, './x.db');
+    assert.equal(parsed.options.json, true);
+  } else {
+    assert.fail('expected a takedown parse');
+  }
+
+  assert.equal(parseArgs(['takedown', 'reddit']).ok, false, 'a source without an id names nothing removable');
+  assert.equal(parseArgs(['takedown']).ok, false);
+  assert.match(HELP, /takedown/, 'the verb is undocumented');
+});
+
 test('shipped copy carries no em dash or en dash', () => {
   assert.doesNotMatch(HELP, new RegExp(`${String.fromCodePoint(0x2014)}|${String.fromCodePoint(0x2013)}`));
 });

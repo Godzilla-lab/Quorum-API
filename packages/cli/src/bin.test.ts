@@ -55,6 +55,39 @@ test('the linked bin is a symlink, which is the whole reason for these tests', (
   );
 });
 
+/*
+ * The takedown path, end to end through the real binary: write a record,
+ * remove it, prove the corpus forgot it. The second call proves removing
+ * nothing is an answer rather than an error.
+ */
+test('quorum takedown removes a record and says so, and removing nothing says that too', async () => {
+  if (!existsSync(LINKED_BIN)) return;
+  const { openSqliteCorpus } = await import('@quorum/corpus');
+  const path = join(ROOT, 'node_modules', '.cache', 'cli-takedown-test.db');
+  const { rmSync } = await import('node:fs');
+  rmSync(path, { force: true });
+
+  const corpus = openSqliteCorpus({ path });
+  await corpus.addDocs([{
+    source: 'reddit', kind: 'comment', externalId: 't1_gone', channel: 'running',
+    text: 'please remove this comment of mine', score: 1, url: 'https://e.test', createdUtc: 1,
+  }], 'running shoes');
+  await corpus.close();
+
+  const removed = runLinked(['takedown', 'reddit', 't1_gone', '--corpus', path]);
+  assert.equal(removed.status, 0);
+  assert.match(removed.stdout, /removed 1 row/);
+
+  const again = runLinked(['takedown', 'reddit', 't1_gone', '--corpus', path, '--json']);
+  assert.equal(again.status, 0);
+  assert.equal(JSON.parse(again.stdout).removed, 0, 'nothing held is an answer, not an error');
+
+  const check = openSqliteCorpus({ path });
+  assert.deepEqual(await check.search('remove this comment'), [], 'and search has forgotten it');
+  await check.close();
+  rmSync(path, { force: true });
+});
+
 test('npx quorum --help prints something rather than exiting silently', () => {
   if (!existsSync(LINKED_BIN)) return;
   const { stdout } = runLinked(['--help']);

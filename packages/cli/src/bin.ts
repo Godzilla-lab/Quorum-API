@@ -42,6 +42,33 @@ export async function main(argv: readonly string[]): Promise<number> {
   if (parsed.kind === 'help') { process.stdout.write(`${HELP}\n`); return EXIT_OK; }
   if (parsed.kind === 'version') { process.stdout.write(`${VERSION}\n`); return EXIT_OK; }
 
+  if (parsed.kind === 'takedown') {
+    const { openSqliteCorpus } = await import('@quorum/corpus');
+    const corpus = openSqliteCorpus({ path: parsed.options.corpusPath });
+    try {
+      const { source, externalId } = parsed.options;
+      /*
+       * An unknown source deletes zero rows and says so, which is safer than
+       * validating against a source list: the corpus can hold records from
+       * sources this build no longer ships, and those must stay removable.
+       */
+      const removed = await corpus.deleteByExternalId(
+        source as Parameters<typeof corpus.deleteByExternalId>[0],
+        externalId,
+      );
+      if (parsed.options.json) {
+        process.stdout.write(`${JSON.stringify({ source, externalId, removed }, null, 2)}\n`);
+      } else {
+        process.stdout.write(removed === 0
+          ? `nothing held under ${source} ${externalId}, so there was nothing to remove\n`
+          : `removed ${removed} row${removed === 1 ? '' : 's'} for ${source} ${externalId}, from every category and from search\n`);
+      }
+      return EXIT_OK;
+    } finally {
+      await corpus.close();
+    }
+  }
+
   if (parsed.kind === 'verify') {
     const { openSqliteCorpus } = await import('@quorum/corpus');
     const { readClaims, renderVerify, verifyClaims } = await import('./verify.ts');

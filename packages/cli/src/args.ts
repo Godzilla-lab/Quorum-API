@@ -136,9 +136,19 @@ export interface VerifyOptions {
   json: boolean;
 }
 
+export interface TakedownOptions {
+  /* The source the record came from, exactly as the record names it. */
+  source: string;
+  /* The source's own id for the record, not the receipt id. */
+  externalId: string;
+  corpusPath: string;
+  json: boolean;
+}
+
 export type ParseResult =
   | { ok: true; kind: 'run'; options: CliOptions }
   | { ok: true; kind: 'verify'; options: VerifyOptions }
+  | { ok: true; kind: 'takedown'; options: TakedownOptions }
   | { ok: true; kind: 'help' }
   | { ok: true; kind: 'version' }
   | { ok: false; message: string };
@@ -174,6 +184,9 @@ export function parseArgs(argv: readonly string[]): ParseResult {
    * research the word "verify".
    */
   if (argv[0] === 'verify') return parseVerify(argv.slice(1));
+  /* Same reasoning as verify: a verb, checked first, so `quorum takedown` can
+   * never be read as a request to research the word "takedown". */
+  if (argv[0] === 'takedown') return parseTakedown(argv.slice(1));
 
   const positional: string[] = [];
   const values = new Map<string, string>();
@@ -317,6 +330,60 @@ export function parseArgs(argv: readonly string[]): ParseResult {
   };
 }
 
+/*
+ * The takedown path, finally reachable. `deleteByExternalId` sat implemented
+ * in both drivers, covered by conformance, documented as the answer to "when
+ * a record is deleted at source, or a person asks", and callable by nothing.
+ * An archive that retains public usernames indefinitely has to offer the
+ * person an exit, and a right that exists only in an interface file is not
+ * offered.
+ *
+ * It takes the SOURCE ID PAIR rather than a receipt id, deliberately: the
+ * receipt id is a hash of exactly these two values, so the pair is what a
+ * takedown request actually names ("my reddit comment t1_abc"), and deleting
+ * by receipt id would invite deleting a record without knowing what it was.
+ */
+function parseTakedown(argv: readonly string[]): ParseResult {
+  const positional: string[] = [];
+  const values = new Map<string, string>();
+  const flags = new Set<string>();
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (!arg.startsWith('-')) { positional.push(arg); continue; }
+
+    const eq = arg.indexOf('=');
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+
+    if (name === '--json') { flags.add(name); continue; }
+    if (name === '--help' || name === '-h') return { ok: true, kind: 'help' };
+    if (name !== '--corpus') {
+      return { ok: false, message: `unknown option ${name} for takedown. Run quorum --help for the list.` };
+    }
+    if (eq !== -1) { values.set(name, arg.slice(eq + 1)); continue; }
+    const next = argv[i + 1];
+    if (next === undefined) return { ok: false, message: `${name} needs a value` };
+    values.set(name, next);
+    i++;
+  }
+
+  const [source, externalId] = positional;
+  if (!source || !externalId) {
+    return { ok: false, message: 'takedown needs a source and an external id: quorum takedown reddit t1_abc123' };
+  }
+
+  return {
+    ok: true,
+    kind: 'takedown',
+    options: {
+      source,
+      externalId,
+      corpusPath: values.get('--corpus') ?? DEFAULT_CORPUS_PATH,
+      json: flags.has('--json'),
+    },
+  };
+}
+
 function parseVerify(argv: readonly string[]): ParseResult {
   const positional: string[] = [];
   const values = new Map<string, string>();
@@ -414,6 +481,14 @@ export const HELP = [
   '  against the records it cites. Reads our own --json output or any file with',
   '  claims carrying ids. A dash reads stdin. Exits 4 if anything was invented,',
   '  so it can run in a pipeline against output we did not produce.',
+  '',
+  'Removing a record',
+  '  quorum takedown <source> <external-id> [--corpus PATH] [--json]',
+  '',
+  '  Deletes one record from the corpus, every category it was harvested into,',
+  '  and the search index. For when a record is deleted at its source or a',
+  '  person asks. Takes the source and the source\'s own id, which is what a',
+  '  takedown request actually names, and prints how many rows were removed.',
   '',
   'Exit codes',
   '  0  the run completed, including when a source degraded',
