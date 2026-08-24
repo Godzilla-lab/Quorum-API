@@ -66,11 +66,30 @@ import type { Env } from '@quorum/sources';
  * matters: you can always see which model produced a given sentence. What is
  * given up is the guarantee that two runs use the same one, and on a free
  * shared pool that guarantee was never real.
+ *
+ * RE-PROBED 2026-08-24, all seven models the registry then listed as free and
+ * image capable, same key, minutes apart:
+ *
+ *   nvidia/nemotron-nano-12b-v2-vl:free   404, WITHDRAWN from the registry
+ *   google/gemma-4-31b-it:free            429, shared pool limited
+ *   google/gemma-4-26b-a4b-it:free        429, shared pool limited
+ *   nvidia/nemotron-3-nano-omni-30b...    upstream Nvidia resource error
+ *   dots-studio/dots-3-note-preview:free  answers text, returns nothing for
+ *                                         images despite the listed modality
+ *   thinkingmachines/inkling*:free        403 "only available on agentic
+ *                                         harnesses", permanently unusable
+ *
+ * The withdrawn model is dropped, the omni model joins as the third vision
+ * rung, and dots stays LAST AND MUST STAY: it is text only in practice, but
+ * expansion shares this list and dots was the only model answering text on
+ * 2026-08-24. In that probe hour no free model produced a reading at all;
+ * vision degrades to nothing by design when the pool is exhausted, and a paid
+ * fallback is a spend decision that is not taken here.
  */
 export const VISION_MODELS = [
-  'nvidia/nemotron-nano-12b-v2-vl:free',
   'google/gemma-4-31b-it:free',
   'google/gemma-4-26b-a4b-it:free',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
   'dots-studio/dots-3-note-preview:free',
 ] as const;
 
