@@ -1,0 +1,4 @@
+{
+  "love": { "records": 8, "precision": 0.285, "recall": 1.0 },
+  "running-shoes": { "records": 15, "precision": 0.666, "recall": 0.888 }
+}
