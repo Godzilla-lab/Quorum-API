@@ -110,6 +110,41 @@ test('a missing leg is named, since it explains part of the gap', () => {
   assert.match(s.suggestions.join(' '), /hackernews contributed nothing/);
 });
 
+/*
+ * The symmetric alarm. Measured live: a run on the subject "love" stored 2544
+ * of 2544 records seen, printed findings from all of them, and this module
+ * called it sufficient with nothing else to say. A gate that rejects nothing
+ * on thousands of records has collapsed, and the report has to say so even
+ * while the verdict stays sufficient.
+ */
+test('a gate that rejects nothing on a large run is flagged, even when sufficient', () => {
+  const claims = [corroborate('sizing', [doc('a'), doc('b'), doc('c')])];
+  const s = assessSufficiency({
+    retrieval: retrieval({ totalSeen: 2544, totalWritten: 2544 }),
+    claims, corpusRecords: 2544, subjectResolved: false,
+  });
+  assert.equal(s.verdict, 'sufficient');
+  assert.match(s.warnings.join(' '), /rejects nothing/);
+  assert.match(s.warnings.join(' '), /single common word/);
+});
+
+test('a healthy pass rate raises no warning', () => {
+  const claims = [corroborate('sizing', [doc('a'), doc('b'), doc('c')])];
+  const s = assessSufficiency({
+    retrieval: retrieval({ totalSeen: 2604, totalWritten: 1746 }),
+    claims, corpusRecords: 1746, subjectResolved: true,
+  });
+  assert.deepEqual(s.warnings, []);
+});
+
+test('a small scoped run passing everything is health, not collapse', () => {
+  const s = assessSufficiency({
+    retrieval: retrieval({ totalSeen: 5, totalWritten: 5 }),
+    claims: [corroborate('sizing', [doc('a')])], corpusRecords: 5, subjectResolved: true,
+  });
+  assert.deepEqual(s.warnings, [], 'five for five from a regulator queried by name is fine');
+});
+
 test('an offline run with a warm corpus is still assessed', () => {
   const s = assessSufficiency({
     retrieval: null,

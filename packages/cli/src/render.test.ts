@@ -81,7 +81,7 @@ function result(over: Partial<RunResult> = {}): RunResult {
     durationBasis: { reported: 0, startDate: 0, observationSpan: 0, none: 0 },
     sufficiency: {
       verdict: 'sufficient', reason: '2 of 2 questions have enough corroboration to answer',
-      suggestions: [], seen: 495, rejected: 155, stored: 340, findings: 2,
+      suggestions: [], warnings: [], seen: 495, rejected: 155, stored: 340, findings: 2,
     },
     receiptCheck: { cited: 3, resolved: 3, unresolved: [] },
     cost: { totalUsd: 0, lines: [], hasUnverified: false, overCap: false },
@@ -317,7 +317,7 @@ test('a run that answered nothing says why and what would fix it', () => {
       verdict: 'insufficient',
       reason: 'every one of the 73 records found was rejected as off topic, so nothing was stored',
       suggestions: ['the subject may be too broad', 'name the product more specifically'],
-      seen: 73, rejected: 73, stored: 0, findings: 0,
+      warnings: [], seen: 73, rejected: 73, stored: 0, findings: 0,
     },
   }));
   assert.match(text, /NO ANSWER  every one of the 73 records/);
@@ -329,7 +329,7 @@ test('a thin run is labelled differently from one that found nothing', () => {
   const text = renderText(result({
     sufficiency: {
       verdict: 'thin', reason: '12 records held, but nothing reached the corroboration threshold',
-      suggestions: ['raise --queries'], seen: 40, rejected: 28, stored: 12, findings: 0,
+      suggestions: ['raise --queries'], warnings: [], seen: 40, rejected: 28, stored: 12, findings: 0,
     },
   }));
   assert.match(text, /^THIN  12 records held/m);

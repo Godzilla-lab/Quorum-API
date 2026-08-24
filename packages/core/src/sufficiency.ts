@@ -37,6 +37,15 @@ export interface Sufficiency {
    * --communities" is useless without saying why it would help.
    */
   suggestions: string[];
+  /*
+   * Trouble the verdict does NOT capture, printed even when the verdict is
+   * `sufficient`. The verdict answers "was this enough", and a collapsed gate
+   * produces plenty: a run on the subject "love" stored 2544 of 2544 records
+   * seen, printed findings from all of them, and this module called it
+   * sufficient. The alarm that catches a gate rejecting everything existed;
+   * the symmetric one for a gate rejecting nothing did not.
+   */
+  warnings: string[];
   /* The numbers behind the verdict, so it can be checked rather than believed. */
   seen: number;
   rejected: number;
@@ -53,13 +62,37 @@ export interface SufficiencyInput {
   subjectResolved: boolean;
 }
 
+/*
+ * The gate pass rate above which a run is flagged rather than trusted.
+ *
+ * 0.95 rather than 1.0 because dedupe and per source budgets shave a few
+ * records off `stored` even when the gate rejected nothing, so a collapsed
+ * gate does not reliably present as exactly 100%. The floor on `seen` keeps a
+ * legitimately scoped run quiet: a regulator queried by product name returns
+ * five records that are all on topic, and five for five is health, not
+ * collapse. 200 is above every scoped source's observed yield and far below
+ * the thousands a general forum returns when the gate has stopped gating.
+ */
+export const GATE_ALARM_PASS_RATE = 0.95;
+export const GATE_ALARM_MIN_SEEN = 200;
+
 export function assessSufficiency(input: SufficiencyInput): Sufficiency {
   const seen = input.retrieval?.totalSeen ?? 0;
   const rejected = input.retrieval?.outcomes.reduce((n, o) => n + o.recordsGated, 0) ?? 0;
   const stored = input.retrieval?.totalWritten ?? 0;
   const findings = input.claims.filter((c) => c.verdict === 'finding').length;
 
-  const base = { seen, rejected, stored, findings };
+  const warnings: string[] = [];
+  if (seen >= GATE_ALARM_MIN_SEEN && stored / seen > GATE_ALARM_PASS_RATE) {
+    warnings.push(
+      `stored ${stored} of ${seen} records seen, and a gate that rejects nothing usually is not gating`,
+    );
+    warnings.push(
+      'the subject may be a single common word: communities matched by name can vouch for every record in them, so treat these findings with suspicion and name the product more specifically',
+    );
+  }
+
+  const base = { seen, rejected, stored, findings, warnings };
   const suggestions: string[] = [];
 
   if (findings > 0) {

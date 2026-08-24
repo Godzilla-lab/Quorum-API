@@ -368,6 +368,19 @@ export function renderText(result: RunResult): string {
   }
 
   /*
+   * WARNINGS PRINT EVEN WHEN THE VERDICT IS SUFFICIENT. The block above only
+   * appears when the run failed to answer, and the one failure it cannot
+   * describe is a run that answered too easily: a collapsed gate stores
+   * everything, produces findings, and reads as healthy everywhere else on
+   * the page. See the warning's origin in sufficiency.ts.
+   */
+  if (suf.warnings.length) {
+    out.push(`GATE      ${suf.warnings[0]}`);
+    for (const w of suf.warnings.slice(1)) out.push(`          - ${w}`);
+    out.push('');
+  }
+
+  /*
    * ATTESTED RECORDS, ABOVE THE VOICE EVIDENCE AND NOT MIXED INTO IT.
    *
    * Placed first because it outranks everything below it. A forum comment is

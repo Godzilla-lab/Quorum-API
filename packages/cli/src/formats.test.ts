@@ -58,7 +58,7 @@ function result(over: Partial<RunResult> = {}): RunResult {
     comparison: null,
     synthesis: null,
     readings: [],
-    sufficiency: { verdict: 'sufficient', reason: 'ok', seen: 0, rejected: 0, stored: 0, findings: 1, suggestions: [] },
+    sufficiency: { verdict: 'sufficient', reason: 'ok', seen: 0, rejected: 0, stored: 0, findings: 1, suggestions: [], warnings: [] },
     receiptCheck: { cited: 3, resolved: 3, unresolved: [] },
     cost: { totalUsd: 0, lines: [], hasUnverified: false, overCap: false },
     elapsedMs: 100,
