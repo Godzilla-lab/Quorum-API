@@ -29,3 +29,20 @@ test('a candidate from a record with no id carries no id, rather than a fabricat
   ]);
   assert.deepEqual(candidate?.receiptIds, []);
 });
+
+/*
+ * The live 2026-08-23 "running shoes" report printed "Wow", "Pro" and "Elite"
+ * as candidate brands: an interjection and two model tier words, capitalised
+ * for reasons other than being a brand.
+ */
+test('interjections and model tier words are never candidate brands', () => {
+  const candidates = brandCandidates([
+    { text: 'Tried the new Pegasus and Wow they are quick, the Pro version even more so', channel: 'a', receiptId: 'rc_1111111111111111' },
+    { text: 'Honestly Wow, between the Pegasus Elite and the Pro I would take either', channel: 'b', receiptId: 'rc_2222222222222222' },
+  ]);
+  const names = candidates.map((c) => c.name.toLowerCase());
+  for (const noise of ['wow', 'pro', 'elite']) {
+    assert.equal(names.includes(noise), false, `${noise} offered as a brand`);
+  }
+  assert.ok(names.includes('pegasus'), 'the real proper noun survives');
+});

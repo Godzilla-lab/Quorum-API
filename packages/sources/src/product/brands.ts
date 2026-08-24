@@ -99,6 +99,21 @@ const NOT_BRANDS = new Set([
   'cpsc', 'nhtsa', 'fda', 'consumer', 'commission', 'safety', 'administration',
   'injury', 'injuries', 'repair', 'refund', 'remedy', 'model', 'models', 'units',
   'sold', 'exclusively', 'nationwide', 'inc', 'llc', 'ltd', 'corp', 'company',
+  /*
+   * Interjections, which are capitalised mid sentence because people shout
+   * them. A live "running shoes" report on 2026-08-23 offered "Wow" as a
+   * candidate brand on the strength of three excited comments.
+   */
+  'wow', 'lol', 'omg', 'ugh', 'huh', 'hmm', 'haha', 'wtf',
+  /*
+   * Model tier words, from the same 2026-08-23 report, which offered "Pro"
+   * and "Elite". They are capitalised because they are part of SOME OTHER
+   * product's name: the Pro in "AirPods Pro" is real and is still never the
+   * brand being researched. A company genuinely named one of these words
+   * loses its candidacy here and keeps every other route in, which is the
+   * right price for never printing "Pro" as a market named brand again.
+   */
+  'pro', 'elite', 'max', 'plus', 'ultra', 'mini', 'lite', 'premium', 'sport',
 ]);
 
 export interface BrandRecord {

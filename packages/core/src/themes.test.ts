@@ -61,6 +61,27 @@ test('AUTOMOD BOILERPLATE CANNOT BECOME A THEME, HOWEVER OFTEN IT REPEATS', () =
   assert.equal(phrases.includes('box narrow'), false);
 });
 
+/*
+ * The live 2026-08-23 "running shoes" report led its TOPICS block with
+ * "havent tried", "looking forward" and "theyre great": conversational filler
+ * that survived through gaps in the stop families, contractions and
+ * intensifiers whose siblings were listed while they were not.
+ */
+test('conversational filler cannot become a theme through a family gap', () => {
+  const records = [
+    ...spread('havent tried them yet myself', 3),
+    ...spread('looking forward to the next drop', 3),
+    ...spread('theyre great value honestly', 3),
+    ...spread('super light on long miles', 3),
+    ...spread('the toe box is narrow on these', 3),
+  ];
+  const phrases = discoverThemes(records, { exclude: [] }).map((t) => t.phrase);
+  for (const filler of ['havent tried', 'looking forward', 'theyre great', 'super light']) {
+    assert.equal(phrases.includes(filler), false, `${filler} became a theme`);
+  }
+  assert.ok(phrases.includes('toe box'), 'the real phrase survives the additions');
+});
+
 test('spread beats volume, which is what corroboration has always believed', () => {
   const records = [
     ...Array.from({ length: 40 }, () => doc('carbon plate carbon plate', 'r/oneplace')),

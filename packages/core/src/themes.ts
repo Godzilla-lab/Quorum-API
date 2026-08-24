@@ -104,6 +104,19 @@ const STOP = new Set([
   'mostly', 'nearly', 'obviously', 'perhaps', 'possibly', 'probably', 'seriously',
   'simply', 'slightly', 'totally', 'truly', 'kinda', 'sorta', 'gonna', 'wanna',
   /*
+   * Gaps in the families above, found by reading a live "running shoes" report
+   * on 2026-08-23. Its TOPICS block led with "havent tried", "looking forward"
+   * and "theyre great": every one survived only because a sibling was listed
+   * and it was not. "cant" and "didnt" were here without "havent"; "youre"
+   * without "theyre"; "try" and "trying" without "tried"; "going" and
+   * "getting" without "looking"; and the intensifier note above describes
+   * "pretty hard" while listing neither "pretty" nor "super". Family
+   * completions, not new judgments.
+   */
+  'havent', 'hasnt', 'hadnt', 'theyre', 'theyve', 'theyll', 'youve', 'youll',
+  'weve', 'arent', 'werent', 'hes', 'shes', 'whos', 'whats', 'tried', 'tries',
+  'looking', 'looked', 'super', 'pretty',
+  /*
    * NOTE ON WHAT IS DELIBERATELY ABSENT: `long`, `high`, `pair`, `big`, `buy`.
    *
    * They were in this list for one iteration, added to stop them ranking as
