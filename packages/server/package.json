@@ -20,7 +20,8 @@
     "@quorum/corpus": "*",
     "@quorum/llm": "*",
     "@quorum/sources": "*",
-    "pg": "^8.23.0"
+    "pg": "^8.23.0",
+    "@quorum/mcp": "*"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1"

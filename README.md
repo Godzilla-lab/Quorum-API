@@ -13,7 +13,7 @@ rather than a README asserting it.
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/quorum-api.svg)](https://www.npmjs.com/package/quorum-api)
-[![Tests](https://img.shields.io/badge/tests-1%2C193-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1%2C201-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
 
@@ -150,9 +150,9 @@ non zero and says which one.
 
 | | |
 |---|---|
-| **Engine** | Working. 1,193 tests, offline and keyless |
+| **Engine** | Working. 1,201 tests, offline and keyless |
 | **CLI** | Working, every flag |
-| **MCP server** | Working, five tools over stdio |
+| **MCP server** | Working, five tools over stdio, four of them also remote at `/mcp` |
 | **JavaScript SDK** | Working, 11 methods |
 | **Webhooks** | Working. Signed to Standard Webhooks, durable, retried for about 75 hours |
 | **Hosted API** | **Deployed and live** at https://quorum-api-j15n.onrender.com, on PostgreSQL, verified against the running instance |
@@ -223,7 +223,7 @@ Working on Quorum itself is the clone path:
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 1,193 tests, offline, no keys
+npm test          # 1,201 tests, offline, no keys
 ```
 
 Then research something. The input is a **subject**, not a URL. Plain text
@@ -371,7 +371,20 @@ Authorization header.
 
 ### MCP server
 
-Five tools over stdio, spoken as JSON-RPC with **no dependency**.
+Five tools spoken as JSON-RPC with **no dependency**, over two transports.
+
+**Remote**, for connector forms that want a URL. The hosted instance answers
+Streamable HTTP at:
+
+```
+https://quorum-api-j15n.onrender.com/mcp
+```
+
+Open without a key: the four read only tools spend nothing and serve public
+data, and anonymous callers share one rate allowance so they cannot crowd out
+keyed customers. The `research_product` tool is never exposed remotely.
+
+**Local**, over stdio, for clients that launch a command:
 
 ```bash
 QUORUM_CORPUS=./quorum.db node packages/mcp/src/bin.ts
@@ -724,7 +737,7 @@ npm run test:postgres  # the driver against a real server, needs QUORUM_PG_URL
 
 CI runs the test suite inside a network namespace with no route off the host, so
 an adapter that quietly reaches for the wire fails immediately instead of flaking
-later. Three of the 1,193 tests need a real PostgreSQL server and skip without
+later. Three of the 1,201 tests need a real PostgreSQL server and skip without
 `QUORUM_PG_URL`.
 
 ## License

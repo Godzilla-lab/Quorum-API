@@ -36,6 +36,7 @@ import { scoreKindOf, tierOf } from '@quorum/corpus/tiers';
 import { resolveCitations, fabricationReport, type ModelClaim } from '@quorum/core';
 import type { JobQueue, ReportRequest, ReportSnapshot } from './jobs.ts';
 import { checkWebhookUrl, deriveSecret } from './webhooks.ts';
+import { createTools, handleMessage } from '@quorum/mcp';
 
 export interface ServerOptions {
   corpus: CorpusDriver;
@@ -235,6 +236,17 @@ export function createReceiptsServer(options: ServerOptions): Server {
   const quotas = options.quotas;
 
   /*
+   * THE REMOTE MCP ENDPOINT: the same four read only tools the stdio server
+   * speaks, at POST /mcp, so a hosted instance has a URL that MCP clients and
+   * connector forms can take. Streamable HTTP in its stateless form: one JSON
+   * response per POST, no sessions, no server initiated stream. The research
+   * tool is deliberately absent, exactly as the stdio server's read only
+   * default: an agent must not start minutes of retrieval by accident.
+   */
+  const mcpTools = createTools({ corpus });
+  const MCP_INFO = { name: 'quorum', version: '0.1.0' };
+
+  /*
    * How long to wait before polling again. Honoured or not, it has to be said:
    * past a few hundred concurrent callers tight polling is a denial of service
    * we inflicted on ourselves. Queued is longer than running because a queued
@@ -356,6 +368,49 @@ export function createReceiptsServer(options: ServerOptions): Server {
       method: 'GET',
       pattern: /^\/v1\/healthz$/,
       handler: async () => ({ status: 200, body: { ok: true } }),
+    },
+
+    /*
+     * MCP over Streamable HTTP, in its stateless form: every POST carries one
+     * JSON-RPC message (or a 2025-03-26 batch) and gets one JSON reply, no
+     * session id, no server initiated stream. The protocol logic is the same
+     * `handleMessage` the stdio server runs, so the two transports cannot
+     * drift. See the auth block for why this path is open on a keyed
+     * instance, and `createTools` for why the research tool is absent.
+     */
+    {
+      method: 'POST',
+      pattern: /^\/mcp$/,
+      handler: async (ctx) => {
+        const batched = Array.isArray(ctx.body);
+        const messages = batched ? ctx.body as unknown[] : [ctx.body];
+        const replies: Record<string, unknown>[] = [];
+        for (const message of messages) {
+          const reply = await handleMessage(message, mcpTools, MCP_INFO);
+          if (reply) replies.push(reply);
+        }
+        /* Notifications only. The spec wants a bodiless 202, and an undefined
+         * body serialises to exactly that. */
+        if (!replies.length) return { status: 202, body: undefined };
+        return { status: 200, body: batched ? replies : replies[0] };
+      },
+    },
+
+    {
+      method: 'GET',
+      pattern: /^\/mcp$/,
+      handler: async (ctx) => ({
+        status: 405,
+        body: {
+          error: {
+            type: 'invalid_request',
+            message: 'this MCP endpoint is POST only and opens no server initiated stream',
+            requestId: ctx.requestId,
+            retryAfterSeconds: null,
+          },
+        },
+        headers: { allow: 'POST' },
+      }),
     },
 
     /*
@@ -811,7 +866,17 @@ export function createReceiptsServer(options: ServerOptions): Server {
          * and a bare 401 teaches them nothing. Exempt from auth and from the
          * meters for the same reason healthz is: it reads nothing.
          */
-        if (requireAuth && url.pathname !== '/v1/healthz' && url.pathname !== '/') {
+        /*
+         * /mcp IS OPEN ON A KEYED INSTANCE, AND THAT IS A DOCUMENTED STANCE,
+         * not an oversight. The keyed door exists to protect spend: synthesis,
+         * ads, retrieval. The MCP tools are read only projections of public
+         * data the corpus already holds, they can spend nothing, and connector
+         * forms offer no field to put a key in. Anonymous MCP callers share
+         * one rate bucket below, so they cannot crowd out keyed customers; a
+         * caller who does present a valid key gets their own allowance.
+         */
+        const openPath = url.pathname === '/v1/healthz' || url.pathname === '/' || url.pathname === '/mcp';
+        if (requireAuth && !openPath) {
           const header = req.headers.authorization ?? '';
           const presented = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
           const label = presented && keyHashes ? keyMatches(presented, keyHashes) : null;
@@ -821,6 +886,11 @@ export function createReceiptsServer(options: ServerOptions): Server {
             return;
           }
           keyLabel = label;
+        } else if (requireAuth && url.pathname === '/mcp') {
+          const header = req.headers.authorization ?? '';
+          const presented = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+          const label = presented && keyHashes ? keyMatches(presented, keyHashes) : null;
+          keyLabel = label ?? 'mcp-public';
         }
 
         /*
