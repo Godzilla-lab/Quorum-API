@@ -21,7 +21,7 @@ import { createJobQueue, type JobQueue, type RunContext, type RunOutcome } from 
 const scratch = mkdtempSync(join(tmpdir(), 'receipts-server-'));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-interface Live { base: string; ids: string[]; queue?: JobQueue; finish?: (over?: Partial<RunOutcome>) => void; close: () => Promise<void> }
+interface Live { base: string; ids: string[]; corpus: CorpusDriver; queue?: JobQueue; finish?: (over?: Partial<RunOutcome>) => void; close: () => Promise<void> }
 
 async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: boolean; webhookSecret?: string; contactEmail?: string } = {}): Promise<Live> {
   const corpus: CorpusDriver = openSqliteCorpus({ path: join(scratch, `c-${Math.floor(performance.now() * 1e6)}.db`) });
@@ -66,6 +66,7 @@ async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: 
   return {
     base: `http://127.0.0.1:${port}`,
     ids: rows.map((r) => r.receiptId),
+    corpus,
     ...(queue ? { queue } : {}),
     finish: (outcome: Partial<RunOutcome> = {}) => release?.({
       subject: { title: 'wool runner' },
@@ -294,6 +295,35 @@ test('a completed report carries this caller findings and stops sending Retry-Af
     assert.equal(report.status, 'complete');
     assert.deepEqual(report.findings.map((f) => f.term), ['sizing']);
     assert.equal(res.headers.get('retry-after'), null, 'nothing left to wait for');
+  } finally { await s.close(); }
+});
+
+/*
+ * The queue is in memory and the hosted tier sleeps. Before the snapshot
+ * fallback, every finished report 404ed on the restart after it completed,
+ * which reads to a caller as their report never having existed.
+ */
+test('A REPORT THE QUEUE HAS FORGOTTEN IS SERVED FROM ITS PERSISTED SNAPSHOT', async () => {
+  const s = await live({ withQueue: true });
+  try {
+    const payload = JSON.stringify({ id: 'rep_0123456789abcdef', status: 'complete', findings: [] }, null, 2);
+    await s.corpus.saveReportSnapshot({
+      reportId: 'rep_0123456789abcdef', tenantId: 'key-0', category: 'shoes',
+      status: 'complete', payload,
+    });
+
+    const res = await fetch(`${s.base}/v1/reports/rep_0123456789abcdef`);
+    assert.equal(res.status, 200);
+    assert.equal(await res.text(), payload, 'the exact bytes the report said while it was live');
+    assert.equal(res.headers.get('retry-after'), null, 'terminal, nothing to wait for');
+
+    /* Terminal reports never advance, so the tag is stable and polling is free. */
+    const etag = res.headers.get('etag')!;
+    const again = await fetch(`${s.base}/v1/reports/rep_0123456789abcdef`, { headers: { 'if-none-match': etag } });
+    assert.equal(again.status, 304);
+
+    /* An id neither the queue nor the corpus knows is still a 404. */
+    assert.equal((await fetch(`${s.base}/v1/reports/rep_ffffffffffffffff`)).status, 404);
   } finally { await s.close(); }
 });
 

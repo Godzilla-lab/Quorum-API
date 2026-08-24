@@ -862,7 +862,7 @@ components:
         product, or we looked in the wrong place, or we found plenty and threw
         it all away. Those are entirely different situations and only one of
         them is the market's fault.
-      required: [verdict, reason, suggestions, seen, rejected, stored, findings]
+      required: [verdict, reason, suggestions, warnings, seen, rejected, stored, findings]
       properties:
         verdict:
           type: string
@@ -882,6 +882,16 @@ components:
             to narrow their subject when the real problem is that we found
             nowhere to look wastes their time, so the two cases give opposite
             advice.
+        warnings:
+          type: array
+          items: { type: string }
+          description: |
+            Trouble the verdict does not capture, present even when the verdict
+            is `sufficient`. Usually empty. A relevance gate that rejected
+            almost nothing on a large retrieval produces plenty of findings and
+            reads as healthy everywhere else in the report, so the one failure
+            a sufficient verdict cannot describe announces itself here. Treat a
+            report carrying a warning with suspicion.
         seen: { type: integer }
         rejected:
           type: integer

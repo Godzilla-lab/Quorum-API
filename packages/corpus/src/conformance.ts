@@ -484,6 +484,67 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * Report snapshots. The property that matters is byte identity: the payload
+   * a caller fetches after a restart must be the bytes the report actually
+   * said, which is why the driver stores a string and never an object.
+   */
+  test(`${driverName}: a report snapshot round trips byte for byte`, async () => {
+    await withCorpus(async (c) => {
+      const payload = JSON.stringify({ id: 'rep_0123456789abcdef', findings: [{ term: 'price' }] }, null, 2);
+      await c.saveReportSnapshot({
+        reportId: 'rep_0123456789abcdef',
+        tenantId: 'tenant-a',
+        category: 'running shoes',
+        status: 'complete',
+        payload,
+      });
+
+      const stored = await c.getReportSnapshot('rep_0123456789abcdef');
+      assert.equal(stored?.payload, payload, 'the exact bytes, two space indentation included');
+      assert.equal(stored?.status, 'complete');
+      assert.equal(stored?.tenantId, 'tenant-a');
+      assert.equal(stored?.category, 'running shoes');
+
+      assert.equal(await c.getReportSnapshot('rep_ffffffffffffffff'), null, 'an unknown id is null, not an error');
+    });
+  });
+
+  test(`${driverName}: a snapshot write is idempotent and the first write wins`, async () => {
+    await withCorpus(async (c) => {
+      await c.saveReportSnapshot({
+        reportId: 'rep_aaaaaaaaaaaaaaaa', category: 'running shoes',
+        status: 'complete', payload: 'first',
+      });
+      await c.saveReportSnapshot({
+        reportId: 'rep_aaaaaaaaaaaaaaaa', category: 'running shoes',
+        status: 'failed', payload: 'second',
+      });
+      const stored = await c.getReportSnapshot('rep_aaaaaaaaaaaaaaaa');
+      assert.equal(stored?.payload, 'first', 'a terminal state happens once; a replay must not rewrite what a caller may have fetched');
+      assert.equal(stored?.tenantId, null, 'an absent tenant is the null tenant');
+    });
+  });
+
+  test(`${driverName}: snapshots prune by age and nothing else`, async () => {
+    await withClock(async (c, clock) => {
+      await c.saveReportSnapshot({
+        reportId: 'rep_1111111111111111', category: 'running shoes',
+        status: 'complete', payload: 'old',
+      });
+      clock.advanceDays(31);
+      await c.saveReportSnapshot({
+        reportId: 'rep_2222222222222222', category: 'running shoes',
+        status: 'failed', payload: 'young',
+      });
+
+      const removed = await c.pruneReportSnapshots(clock.now() - 30 * 86400);
+      assert.equal(removed, 1, 'only the row past the cutoff');
+      assert.equal(await c.getReportSnapshot('rep_1111111111111111'), null);
+      assert.equal((await c.getReportSnapshot('rep_2222222222222222'))?.payload, 'young', 'a failed report is still a report someone may fetch');
+    });
+  });
+
   test(`${driverName}: the product cache expires rather than serving stale facts`, async () => {
     await withClock(async (c, clock) => {
       await c.cacheProduct({ url: 'https://example.com/shoe', title: 'Shoe', source: 'shopify' }, 'running shoes');

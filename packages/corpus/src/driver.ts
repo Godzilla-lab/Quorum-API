@@ -31,6 +31,8 @@ import type {
   PriorReport,
   ProductFacts,
   ReportInput,
+  ReportSnapshotInput,
+  StoredReportSnapshot,
   DateHistogram,
   DateHistogramOptions,
   SearchOptions,
@@ -105,6 +107,19 @@ export interface CorpusDriver {
   latestAdsByCategory(category: string, limit?: number): Promise<AdObservation[]>;
 
   saveReport(report: ReportInput): Promise<void>;
+
+  /*
+   * Report snapshots: the exact bytes the API served, keyed by the API's
+   * report id, so GET /v1/reports/{id} survives a restart. Idempotent on the
+   * report id, like webhook deliveries and for the same reason: a report
+   * reaches a terminal state once, and if that ever happened twice the second
+   * write must not replace what a caller may have already fetched.
+   */
+  saveReportSnapshot(snapshot: ReportSnapshotInput): Promise<void>;
+  getReportSnapshot(reportId: string): Promise<StoredReportSnapshot | null>;
+  /* Snapshots are all settled by definition, so age is the only criterion.
+   * Returns the number removed. */
+  pruneReportSnapshots(before: number): Promise<number>;
 
   /*
    * Prior reports for a category, SCOPED TO ONE TENANT.

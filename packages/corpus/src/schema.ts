@@ -159,6 +159,27 @@ CREATE TABLE IF NOT EXISTS products (
   fetched_at INTEGER NOT NULL
 );
 
+/*
+ * Report snapshots: TENANT OWNED, the exact bytes the API served.
+ *
+ * The job queue is in memory and the hosted tier sleeps, so a finished report
+ * used to 404 on the restart after it completed. The payload is stored rather
+ * than re-rendered for the same reason webhook_deliveries stores its payload:
+ * after a restart there is nothing left to render from, and the bytes a
+ * caller fetches later must be the bytes the report actually said.
+ */
+CREATE TABLE IF NOT EXISTS report_snapshots (
+  report_id  TEXT PRIMARY KEY,
+  tenant_id  TEXT,
+  category   TEXT NOT NULL,
+  status     TEXT NOT NULL,             -- complete | failed | cancelled
+  payload    TEXT NOT NULL,             -- the exact bytes GET served
+  created_at INTEGER NOT NULL
+);
+
+-- The only scan besides the primary key: pruning by age.
+CREATE INDEX IF NOT EXISTS report_snapshots_prune_idx ON report_snapshots (created_at);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL

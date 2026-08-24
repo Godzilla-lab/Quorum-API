@@ -602,7 +602,25 @@ export function createReceiptsServer(options: ServerOptions): Server {
         if (!queue) return error(501, 'internal', 'this build has no job queue', ctx.requestId);
         const id = REPORT_ID.exec(ctx.url.pathname)![1]!;
         const snapshot = queue.get(id);
-        if (!snapshot) return error(404, 'not_found', 'no report carries this id', ctx.requestId);
+        if (!snapshot) {
+          /*
+           * THE QUEUE FORGETS, THE CORPUS DOES NOT. The queue is in memory, so
+           * a finished report used to 404 after every restart and every sleep,
+           * which reads to a caller as their report never having existed. The
+           * persisted snapshot is the exact bytes this handler served while
+           * the report was live: parse and re-serve, and the serializer
+           * reproduces them byte for byte because parse preserves key order.
+           * A terminal report never advances, so the ETag is stable and there
+           * is no Retry-After to send.
+           */
+          const stored = await corpus.getReportSnapshot(id);
+          if (!stored) return error(404, 'not_found', 'no report carries this id', ctx.requestId);
+          const etag = `"${id}-final"`;
+          if (ctx.headers['if-none-match'] === etag) {
+            return { status: 304, body: null, headers: { etag } };
+          }
+          return { status: 200, headers: { etag }, body: JSON.parse(stored.payload) };
+        }
 
         /*
          * The version changes exactly when the report advances, so a poller

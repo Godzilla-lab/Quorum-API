@@ -49,8 +49,10 @@ import type {
   ProductFacts,
   RecordKind,
   ReportInput,
+  ReportSnapshotInput,
   SearchOptions,
   SourceId,
+  StoredReportSnapshot,
 } from '../types.ts';
 
 /*
@@ -445,6 +447,44 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
         findings: typeof r.findings === 'string' ? JSON.parse(r.findings) : (r.findings ?? {}),
         createdAt: num(r.created_at),
       }));
+    },
+
+    /* Idempotent on the report id. See the driver interface. */
+    async saveReportSnapshot(snapshot: ReportSnapshotInput): Promise<void> {
+      await sql.query(
+        `INSERT INTO report_snapshots (report_id, tenant_id, category, status, payload, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT (report_id) DO NOTHING`,
+        [
+          snapshot.reportId, snapshot.tenantId ?? null, snapshot.category,
+          snapshot.status, snapshot.payload, nowSeconds(),
+        ],
+      );
+    },
+
+    async getReportSnapshot(reportId: string): Promise<StoredReportSnapshot | null> {
+      const rows = await sql.query<{
+        report_id: string; tenant_id: string | null; category: string;
+        status: string; payload: string; created_at: unknown;
+      }>(
+        `SELECT report_id, tenant_id, category, status, payload, created_at
+         FROM report_snapshots WHERE report_id = $1`,
+        [reportId],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        reportId: row.report_id, tenantId: row.tenant_id, category: row.category,
+        status: row.status, payload: row.payload, createdAt: num(row.created_at),
+      };
+    },
+
+    async pruneReportSnapshots(before: number): Promise<number> {
+      const rows = await sql.query<{ report_id: string }>(
+        'DELETE FROM report_snapshots WHERE created_at < $1 RETURNING report_id',
+        [before],
+      );
+      return rows.length;
     },
 
     /* Idempotent on the report id, for the reason given in the SQLite driver. */

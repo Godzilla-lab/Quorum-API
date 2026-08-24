@@ -40,8 +40,10 @@ import type {
   ProductFacts,
   RecordKind,
   ReportInput,
+  ReportSnapshotInput,
   SearchOptions,
   SourceId,
+  StoredReportSnapshot,
 } from '../types.ts';
 
 /*
@@ -561,6 +563,42 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
           createdAt: r.created_at,
         };
       });
+    },
+
+    /* Idempotent on the report id. See the driver interface. */
+    async saveReportSnapshot(snapshot: ReportSnapshotInput): Promise<void> {
+      db.prepare(`
+        INSERT INTO report_snapshots (report_id, tenant_id, category, status, payload, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(report_id) DO NOTHING
+      `).run(
+        snapshot.reportId,
+        snapshot.tenantId ?? null,
+        snapshot.category,
+        snapshot.status,
+        snapshot.payload,
+        nowSeconds(),
+      );
+    },
+
+    async getReportSnapshot(reportId: string): Promise<StoredReportSnapshot | null> {
+      const row = db.prepare(`
+        SELECT report_id, tenant_id, category, status, payload, created_at
+        FROM report_snapshots WHERE report_id = ?
+      `).get(reportId) as {
+        report_id: string; tenant_id: string | null; category: string;
+        status: string; payload: string; created_at: number;
+      } | undefined;
+      if (!row) return null;
+      return {
+        reportId: row.report_id, tenantId: row.tenant_id, category: row.category,
+        status: row.status, payload: row.payload, createdAt: row.created_at,
+      };
+    },
+
+    async pruneReportSnapshots(before: number): Promise<number> {
+      const result = db.prepare('DELETE FROM report_snapshots WHERE created_at < ?').run(before);
+      return Number(result.changes);
     },
 
     /*

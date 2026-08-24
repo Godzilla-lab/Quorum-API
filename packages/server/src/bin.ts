@@ -147,6 +147,23 @@ const webhookWorker = webhooksOn
   : null;
 webhookWorker?.start();
 
+/*
+ * Report snapshots prune by age, the way webhook deliveries do, or the table
+ * inherits the unbounded growth the in memory map used to have. Thirty days
+ * is far past any caller's polling horizon, and the timer is unref'd so it
+ * cannot hold the process open on shutdown. On boot as well, because a free
+ * tier that sleeps may never see a timer fire.
+ */
+const SNAPSHOT_RETAIN_SECONDS = 30 * 86_400;
+const pruneSnapshots = (): void => {
+  void corpus.pruneReportSnapshots(Math.floor(Date.now() / 1000) - SNAPSHOT_RETAIN_SECONDS)
+    .catch((err: unknown) => {
+      process.stderr.write(`snapshots: prune failed, next attempt in a day: ${err instanceof Error ? err.message : 'unknown'}\n`);
+    });
+};
+pruneSnapshots();
+setInterval(pruneSnapshots, 24 * 60 * 60_000).unref();
+
 const queue = createJobQueue({
   concurrency,
 
@@ -301,6 +318,13 @@ const queue = createJobQueue({
     const stats = await corpus.categoryStats(category);
     return isWarm(stats.docs, stats.ageDays) ? WARM_SECONDS : COLD_SECONDS;
   },
+
+  /*
+   * The exact GET bytes, durably, so a finished report survives the restart
+   * this tier is guaranteed to take. The queue evicts terminal reports after
+   * an hour and the GET handler falls back to this row.
+   */
+  persistSnapshot: (snap) => corpus.saveReportSnapshot(snap),
 
   /*
    * Recording only. The queue writes a row and returns; the worker below

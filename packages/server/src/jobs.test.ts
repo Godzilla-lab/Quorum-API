@@ -573,6 +573,54 @@ test('the queued payload is byte identical to the report body', async () => {
   assert.equal(hook.enqueued[0]?.payload, JSON.stringify(q.get(id), null, 2));
 });
 
+/* ------------------------------------------------------------------ */
+/* report snapshots and eviction                                       */
+/* ------------------------------------------------------------------ */
+
+test('a finished report is persisted with the exact bytes GET serves', async () => {
+  const saved: { reportId: string; tenantId: string; category: string; status: string; payload: string }[] = [];
+  const { q, runner } = queue({ persistSnapshot: async (s) => { saved.push(s); } });
+  const accepted = await q.submit(request(), { keyLabel: 'key-a' });
+  const id = (accepted as { accepted: { id: string } }).accepted.id;
+  runner.finish();
+  await settled();
+
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0]?.reportId, id);
+  assert.equal(saved[0]?.tenantId, 'key-a', 'snapshots are tenant owned');
+  assert.equal(saved[0]?.status, 'complete');
+  assert.equal(saved[0]?.payload, JSON.stringify(q.get(id), null, 2),
+    'byte identical to the GET body, or the fallback serves a different report than the API did');
+});
+
+test('a snapshot that cannot be written does not fail a good report', async () => {
+  const { q, runner } = queue({ persistSnapshot: async () => { throw new Error('database is down'); } });
+  const accepted = await q.submit(request(), { keyLabel: 'key-a' });
+  runner.finish();
+  await settled();
+  assert.equal(q.get((accepted as { accepted: { id: string } }).accepted.id)?.status, 'complete');
+});
+
+/*
+ * The map held every report forever: an unbounded leak, each entry carrying
+ * the full outcome, claims and every SSE event. Swept on use, like the
+ * idempotency map, because a timer in a library is a handle that keeps a
+ * process alive.
+ */
+test('terminal reports are swept after the retention, so the map is bounded', async () => {
+  let t = 1_700_000_000_000;
+  const { q, runner } = queue({ now: () => t, reportRetentionMs: 60 * 60_000 });
+  const accepted = await q.submit(request(), { keyLabel: 'key-a' });
+  const id = (accepted as { accepted: { id: string } }).accepted.id;
+  runner.finish();
+  await settled();
+  assert.equal(q.get(id)?.status, 'complete', 'still readable inside the retention');
+
+  t += 61 * 60_000;
+  await q.submit(request({ subject: 'another thing entirely' }), { keyLabel: 'key-b' });
+  assert.equal(q.get(id), null, 'swept; GET now answers from the persisted snapshot');
+});
+
 test('a report with no webhook url queues nothing', async () => {
   const hook = webhookRecorder();
   const { q, runner } = queue({ enqueueWebhook: hook.enqueueWebhook });

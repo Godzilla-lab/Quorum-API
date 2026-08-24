@@ -173,6 +173,27 @@ export interface QueueOptions {
   /* Warm or cold, for `estimatedSeconds`. Optional: a null estimate is honest
    * and a made up one is not. */
   estimateSeconds?(category: string): Promise<number | null>;
+  /*
+   * Persist the exact bytes GET serves for a finished report, so the report
+   * survives the process. Injected for the same reason `enqueueWebhook` is:
+   * this queue owns neither the corpus nor the network. A persist that throws
+   * must not fail the report, which succeeded and is readable in memory.
+   */
+  persistSnapshot?(snapshot: {
+    reportId: string;
+    tenantId: string;
+    category: string;
+    status: string;
+    payload: string;
+  }): Promise<void>;
+  /*
+   * How long a terminal report stays in memory before it is swept. After the
+   * sweep, GET is served by the persisted snapshot. Before this existed the
+   * map was never evicted at all: an unbounded leak proportional to lifetime
+   * report count, each entry holding the full outcome, claims and every SSE
+   * event.
+   */
+  reportRetentionMs?: number;
 }
 
 const DEFAULT_CONCURRENCY = 2;
@@ -311,6 +332,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
   const maxQueued = options.maxQueued ?? DEFAULT_MAX_QUEUED;
   const maxPerKey = options.maxPerKey ?? DEFAULT_MAX_PER_KEY;
   const idempotencyTtl = options.idempotencyTtlMs ?? DAY_MS;
+  const reportRetention = options.reportRetentionMs ?? 60 * 60_000;
   const now = options.now ?? (() => Date.now());
 
   const reports = new Map<string, Report>();
@@ -382,6 +404,27 @@ export function createJobQueue(options: QueueOptions): JobQueue {
     if (status === 'failed') emit(report, 'error', { message: error });
     else emit(report, 'done', { status });
 
+    /*
+     * Byte identical to what GET /v1/reports/{id} serves, including the two
+     * space indentation. Computed once and shared by the snapshot and the
+     * webhook, because the bytes persisted, the bytes signed, and the bytes a
+     * receiver can compare against the API must all be the same bytes.
+     */
+    const snap = snapshot(report);
+    const payload = JSON.stringify(snap, null, 2);
+
+    if (options.persistSnapshot) {
+      try {
+        await options.persistSnapshot({
+          reportId: report.id,
+          tenantId: report.keyLabel,
+          category: snap.category,
+          status,
+          payload,
+        });
+      } catch { /* a snapshot that cannot be written must not fail a good report */ }
+    }
+
     const url = report.request.webhookUrl;
     if (!url || !options.enqueueWebhook) return;
     try {
@@ -390,12 +433,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
         tenantId: report.keyLabel,
         keyLabel: report.keyLabel,
         url,
-        /*
-         * Byte identical to what GET /v1/reports/{id} serves, including the two
-         * space indentation, because the bytes signed must be the bytes a
-         * receiver can compare against the API.
-         */
-        payload: JSON.stringify(snapshot(report), null, 2),
+        payload,
       });
     } catch { /* a webhook that cannot be queued must not fail a good report */ }
   }
@@ -546,6 +584,19 @@ export function createJobQueue(options: QueueOptions): JobQueue {
        * that keeps a process alive and surprises whoever embeds it. */
       const cutoff = now() - idempotencyTtl;
       for (const [k, v] of idempotency) if (v.at < cutoff) idempotency.delete(k);
+
+      /*
+       * Terminal reports are swept the same way, because this map held every
+       * report forever: an unbounded leak, each entry carrying the full
+       * outcome, claims and every SSE event. An hour is enough for any poller
+       * or resuming stream; after that GET falls back to the persisted
+       * snapshot. An idempotency entry pointing at a swept report already
+       * falls through to a fresh submit, fingerprint checked.
+       */
+      const reportCutoff = now() - reportRetention;
+      for (const [id, r] of reports) {
+        if (r.completedAt !== null && r.completedAt < reportCutoff) reports.delete(id);
+      }
 
       if (idempotencyKey) {
         /*

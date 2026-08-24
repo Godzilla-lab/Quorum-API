@@ -170,6 +170,36 @@ export interface PriorReport {
 }
 
 /*
+ * A finished report, exactly as the API served it.
+ *
+ * WHY THE PAYLOAD IS THE STORED BYTES AND NOT COLUMNS. The job queue is in
+ * memory and the hosted tier sleeps, so before this existed every report
+ * 404ed after a restart while `webhook_deliveries` quietly held the identical
+ * payload for the subset of callers who had asked for a webhook. Storing the
+ * exact bytes is the same decision made there, for the same reason: after a
+ * restart there is nothing left to render from.
+ */
+export interface ReportSnapshotInput {
+  reportId: string;
+  /* Snapshots are tenant owned, like reports. See the tenant boundary note. */
+  tenantId?: string | null;
+  category: string;
+  /* The terminal status: complete | failed | cancelled. */
+  status: string;
+  /* The exact bytes GET /v1/reports/{id} served for this report. */
+  payload: string;
+}
+
+export interface StoredReportSnapshot {
+  reportId: string;
+  tenantId: string | null;
+  category: string;
+  status: string;
+  payload: string;
+  createdAt: number;
+}
+
+/*
  * A queued webhook delivery.
  *
  * ONE REPORT HAS ONE DELIVERY, so the report id is the key rather than a
