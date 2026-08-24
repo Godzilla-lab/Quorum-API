@@ -117,6 +117,27 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * One call may carry the same record twice: a source that pages overlapping
+   * windows hands the orchestrator overlapping batches. The duplicate counts
+   * once and the FIRST occurrence is the one stored, matching the
+   * first-write-wins rule the table enforces across calls.
+   */
+  test(`${driverName}: duplicates inside one addDocs call count once, first occurrence wins`, async () => {
+    await withCorpus(async (c) => {
+      const added = await c.addDocs([
+        doc({ externalId: 'dup', text: 'the first sighting' }),
+        doc({ externalId: 'solo' }),
+        doc({ externalId: 'dup', text: 'the second sighting' }),
+      ], 'running shoes');
+      assert.equal(added, 2);
+      assert.equal((await c.totals()).docs, 2);
+
+      const stored = await c.getByReceiptIds([receiptId('reddit', 'dup')]);
+      assert.equal(stored[0]?.text, 'the first sighting');
+    });
+  });
+
   test(`${driverName}: records without text or an external id are skipped, not stored`, async () => {
     await withCorpus(async (c) => {
       const added = await c.addDocs(

@@ -175,22 +175,56 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       if (!docs.length) return 0;
       const harvestedAt = nowSeconds();
 
+      /*
+       * ONE ROUND TRIP PER CHUNK, NOT PER ROW. This was one INSERT per record
+       * until 2026-08-24, and against a managed database that is a disaster
+       * dressed as correctness: every statement pays the full round trip, and
+       * a warm rerun paid it again for every ON CONFLICT no-op. It is why the
+       * hosted runs of 2026-08-24 took 15 to 20 minutes for ~2,900 records.
+       *
+       * Measured live against Aiven, 2026-08-24, 100 rows from a laptop at
+       * ~678ms RTT (Render sits closer, the ratio is the point):
+       *
+       *   one row per statement   67.8s
+       *   one batched call         0.89s   76x
+       *   warm rerun, all dupes    0.54s  125x
+       *
+       * RETURNING id still fires once per row actually inserted, so the
+       * "genuinely new" count survives batching exactly.
+       *
+       * Duplicates WITHIN one call are collapsed here first, keeping the
+       * first occurrence, for two reasons: it mirrors the first-write-wins
+       * rule the table enforces across calls, and it keeps the statement
+       * independent of how the server treats intra-statement conflicts.
+       */
+      const seen = new Set<string>();
+      const rows: DocInput[] = [];
+      for (const d of docs) {
+        if (!d.text || !d.externalId) continue;
+        const identity = `${d.source}\u0000${storableText(String(d.externalId))}`;
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        rows.push(d);
+      }
+      if (!rows.length) return 0;
+
+      /*
+       * 11 parameters per row against the server's 65,535 parameter cap puts
+       * the hard ceiling near 5,900 rows. 500 stays an order of magnitude
+       * clear of it while still collapsing a retrieval flush (100 rows) into
+       * a single statement.
+       */
+      const CHUNK = 500;
+
       return atomic(async (tx) => {
         let added = 0;
-        for (const d of docs) {
-          if (!d.text || !d.externalId) continue;
-          /*
-           * RETURNING id fires only when the row was actually inserted, so the
-           * row count is the honest "genuinely new" measure that ON CONFLICT
-           * DO NOTHING would otherwise hide.
-           */
-          const rows = await tx.query<{ id: unknown }>(
-            `INSERT INTO docs
-               (receipt_id, source, kind, external_id, category, channel, text, score, url, created_utc, harvested_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-             ON CONFLICT (source, external_id, category) DO NOTHING
-             RETURNING id`,
-            [
+        for (let start = 0; start < rows.length; start += CHUNK) {
+          const chunk = rows.slice(start, start + CHUNK);
+          const params: unknown[] = [];
+          const values: string[] = [];
+          for (const d of chunk) {
+            const base = params.length;
+            params.push(
               /* Minted from the SANITISED external id so the id always
                * re-derives from the value actually stored. See text.ts. */
               receiptId(d.source, storableText(String(d.externalId))),
@@ -198,9 +232,18 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
               storableText(category), storableText(d.channel ?? ''), storableText(d.text),
               d.score ?? 0, storableText(d.url ?? ''),
               d.createdUtc ?? 0, harvestedAt,
-            ],
+            );
+            values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11})`);
+          }
+          const inserted = await tx.query<{ id: unknown }>(
+            `INSERT INTO docs
+               (receipt_id, source, kind, external_id, category, channel, text, score, url, created_utc, harvested_at)
+             VALUES ${values.join(',')}
+             ON CONFLICT (source, external_id, category) DO NOTHING
+             RETURNING id`,
+            params,
           );
-          added += rows.length;
+          added += inserted.length;
         }
         return added;
       });
