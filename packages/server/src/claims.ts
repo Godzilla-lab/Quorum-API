@@ -13,8 +13,9 @@
  */
 
 import {
-  assessSufficiency, corroborate, discoverThemes, evidenceRowsFor, shareOfVoice, trendFor, withEvidence,
-  type ClaimWithEvidence, type RetrievalResult, type Trend,
+  assessSufficiency, corroborate, createCostMeter, discoverThemes, evidenceRowsFor,
+  shareOfVoice, synthesiseAndResolve, trendFor, withEvidence,
+  type AskModel, type ClaimWithEvidence, type RetrievalResult, type SynthesisReport, type Trend,
 } from '@quorum/core';
 import type { CorpusDriver, Doc } from '@quorum/corpus';
 import type { ReportClaims } from './jobs.ts';
@@ -39,21 +40,63 @@ export interface ClaimsInput {
   /* Injected so a test can run at a fixed instant, and so the windows a report
    * compares are the ones its own timestamp implies. */
   nowMs?: number;
+  /*
+   * SYNTHESIS, WHEN THE OPERATOR CONFIGURED A MODEL AND THE BUDGET SAID YES.
+   *
+   * Absent, the report is what it always was: arithmetic over the corpus. The
+   * caller decides whether to pass one, because the spend decision belongs to
+   * whoever pays the bill and this module owns neither the keys nor the
+   * quotas. The model's claims travel through the same fabrication gate the
+   * CLI uses, `synthesiseAndResolve`, so an invented id is dropped and
+   * counted before anything here sees it.
+   */
+  askModel?: AskModel;
+  /* What to call the subject in the prompt. Falls back to the category. */
+  subjectTitle?: string;
 }
 
 export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
   const { corpus, category, terms } = input;
 
   const claims: ClaimWithEvidence[] = [];
+  const termRows = new Map<string, Doc[]>();
   for (const term of terms) {
     const found: Doc[] = await corpus.search(term, { category, limit: EVIDENCE_PER_TERM });
     /* "had absolutely no problem" is praise, not a problems receipt. The
      * stance filter drops records whose every mention of a complaint shaped
      * term is negated. See stance.ts for why it names its terms. */
     const rows = evidenceRowsFor(term, found);
+    termRows.set(term, rows);
     /* The same rows that produced the count produce the sample, so a quote can
      * never come from a record that was not counted. */
     claims.push(withEvidence(corroborate(term, rows), rows));
+  }
+
+  /*
+   * The records handed to the model are exactly the rows that produced the
+   * counts above, deduped by receipt id, same rule as the CLI: a model
+   * reasoning over evidence the counts never saw could cite a record the
+   * report cannot account for. Cost is computed from the tokens the provider
+   * reported and returned to the caller, who owns the quota to charge.
+   */
+  let synthesis: (SynthesisReport & { costUsd: number }) | null = null;
+  if (input.askModel) {
+    const forModel = [...new Map(
+      [...termRows.values()].flat().map((r) => [r.receiptId, r]),
+    ).values()];
+    const report = await synthesiseAndResolve(
+      { subject: input.subjectTitle ?? category, terms: [...terms], records: forModel },
+      input.askModel,
+      corpus,
+    );
+    const meter = createCostMeter({ label: 'quorum-hosted-synthesis' });
+    if (report.model && report.usage) {
+      meter.usage(report.model, {
+        input_tokens: report.usage.inputTokens,
+        output_tokens: report.usage.outputTokens,
+      });
+    }
+    synthesis = { ...report, costUsd: meter.total() };
   }
 
   const warmth = await corpus.categoryStats(category);
@@ -110,6 +153,12 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
     /* The samples are printed too, so their ids are cited in every sense that
      * matters and must resolve like any other. */
     ...claims.flatMap((c) => c.evidence.map((e) => e.receiptId)),
+    /* Synthesis receipts already survived resolveCitations; checking them
+     * again here is defence in depth, and it keeps the receiptCheck line an
+     * honest total over everything the report prints. */
+    ...(synthesis?.claims ?? [])
+      .filter((c) => c.verdict === 'finding')
+      .flatMap((c) => c.receipts.map((r) => r.receiptId)),
   ])];
   const resolved = cited.length ? await corpus.getByReceiptIds(cited) : [];
   const resolvedIds = new Set(resolved.map((r) => r.receiptId));
@@ -119,7 +168,8 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
     weakSignals,
     /* Only synthesis can produce a rejected claim, because rejection means a
      * model quoted something nobody said. Arithmetic over the corpus cannot. */
-    rejected: [],
+    rejected: synthesis ? synthesis.claims.filter((c) => c.verdict === 'rejected') : [],
+    synthesis,
     sufficiency,
     trends,
     themes,

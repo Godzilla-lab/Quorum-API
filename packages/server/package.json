@@ -18,6 +18,7 @@
     "@quorum/cli": "*",
     "@quorum/core": "*",
     "@quorum/corpus": "*",
+    "@quorum/llm": "*",
     "@quorum/sources": "*",
     "pg": "^8.23.0"
   },

@@ -35,6 +35,7 @@ import { openPostgres } from './postgres.ts';
 import { createJobQueue, type ReportRequest, type RunOutcome } from './jobs.ts';
 import { checkInstanceSecret, createWebhookWorker } from './webhooks.ts';
 import { runCorpusOpener } from './run-corpus.ts';
+import { askClaimsLive, claimsConfigured } from '@quorum/llm';
 import type { RetrievalResult } from '@quorum/core';
 import { computeClaims } from './claims.ts';
 
@@ -68,6 +69,17 @@ const concurrency = Number(process.env['QUORUM_CONCURRENCY'] ?? 2);
 const maxCapUsd = Number(process.env['QUORUM_MAX_CAP_USD'] ?? 0);
 const spendPerKeyUsd = Number(process.env['QUORUM_SPEND_PER_KEY_USD'] ?? 0);
 const spendTotalUsd = Number(process.env['QUORUM_SPEND_TOTAL_USD'] ?? 0);
+
+/*
+ * SYNTHESIS FOLLOWS THE SAME SHAPE AS THE BUDGETS ABOVE: off until the
+ * operator configures it, because an unconfigured model key is an operator
+ * who has not agreed to a bill. With no key, hosted findings are the
+ * arithmetic they have always been; with one, each report's claims pass
+ * through the model and its fabrication gate, metered per key through the
+ * same spend budgets as ads.
+ */
+const synthesisReady = claimsConfigured(process.env);
+const synthesisModel = process.env['QUORUM_SYNTHESIS_MODEL']?.trim() || undefined;
 
 /*
  * WEBHOOKS ARE OFF UNTIL A SECRET IS SET, the same shape as the budget above.
@@ -305,14 +317,39 @@ const queue = createJobQueue({
    * One call per REPORT, not per run. This is what stops a joiner inheriting
    * somebody else's questions, and the outcome goes in whole so that a
    * report's sufficiency block agrees with its own retrieval table.
+   *
+   * SYNTHESIS RIDES THE SAME BUDGET DISCIPLINE AS ADS: checked before the
+   * call, because a charge that lands after the money is gone is an audit
+   * trail rather than a limit; charged after, from the tokens the provider
+   * actually reported. With no model key configured, or a budget of zero,
+   * `askModel` is never built and the report is the arithmetic it always
+   * was. This is why `synthesise: false` stayed hardcoded above for the run:
+   * the metered leg lives HERE, per report and per key, where a caller's
+   * refusal cannot be laundered through a coalesced run.
    */
-  claimsFor: (outcome, terms) => computeClaims({
-    corpus,
-    category: outcome.category,
-    terms,
-    retrieval: outcome.retrieval as RetrievalResult | null,
-    subjectResolved: outcome.subjectResolved,
-  }),
+  claimsFor: async (outcome, terms, keyLabel) => {
+    const spend = synthesisReady ? quotas.canSpend(keyLabel) : null;
+    const subject = outcome.subject as { title?: string } | null;
+    const result = await computeClaims({
+      corpus,
+      category: outcome.category,
+      terms,
+      retrieval: outcome.retrieval as RetrievalResult | null,
+      subjectResolved: outcome.subjectResolved,
+      ...(spend?.allowed === true
+        ? {
+          askModel: askClaimsLive(process.env, {
+            ...(synthesisModel ? { model: synthesisModel } : {}),
+            timeoutMs: 120_000,
+          }),
+          ...(subject?.title ? { subjectTitle: subject.title } : {}),
+        }
+        : {}),
+    });
+    const synthCost = (result.synthesis as { costUsd?: number } | null)?.costUsd ?? 0;
+    if (synthCost > 0) quotas.charge(keyLabel, synthCost);
+    return result;
+  },
 
   async estimateSeconds(category) {
     const stats = await corpus.categoryStats(category);
@@ -368,6 +405,9 @@ server.listen(port, () => {
     process.stderr.write('no QUORUM_API_KEYS set, so this instance is OPEN. Fine on a laptop, not on a network.\n');
   }
   process.stderr.write(`reports: live, ${concurrency} concurrent runs, coalesced by subject\n`);
+  process.stderr.write(synthesisReady
+    ? `synthesis: ON${synthesisModel ? ` (${synthesisModel})` : ''}, metered per key through the spend budgets\n`
+    : 'synthesis: off. Findings are corpus arithmetic. Set OPENROUTER_API_KEY and a spend budget to turn it on.\n');
   /* The CONFIGURED numbers, not the defaults. This printed the defaults until
    * 2026-08-23 and cheerfully announced 600 while enforcing 10, which is worse
    * than printing nothing: it is a log that has to be distrusted. */

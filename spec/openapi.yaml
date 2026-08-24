@@ -1463,6 +1463,24 @@ components:
             Claims thrown out because they quoted something nobody said.
             Returned rather than swallowed so the check is auditable.
         fabrication: { $ref: '#/components/schemas/FabricationReport' }
+        synthesis:
+          description: |
+            Model written claims, when the operator has configured a synthesis
+            model and the caller's spend budget allowed it. Null otherwise, and
+            the rest of the report is unaffected either way: findings and weak
+            signals are corpus arithmetic and never depend on a model.
+
+            Every claim in here has already been through the fabrication gate.
+            Ids the model invented were dropped and counted in `fabrication`,
+            corroboration was recomputed over the receipts that actually
+            resolve, and a claim quoting words that appear in none of its cited
+            records is in `rejected` rather than here. `costUsd` is what this
+            report's synthesis actually cost, computed from the token counts
+            the provider reported, and it is charged against the calling key's
+            spend budget.
+          oneOf:
+            - type: 'null'
+            - type: object
         sufficiency: { $ref: '#/components/schemas/Sufficiency' }
         warmth: { $ref: '#/components/schemas/CategoryStats' }
         retrieval:

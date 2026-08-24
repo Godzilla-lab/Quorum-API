@@ -115,6 +115,13 @@ export interface ReportClaims {
   /* Phrases the corpus keeps returning to that this caller did not ask about.
    * A candidate list carrying its receipts, never a set of findings. */
   themes: unknown[];
+  /*
+   * Model written claims, already through the fabrication gate, with what the
+   * model tried to get away with counted. Null when the operator has not
+   * configured a model or the budget refused this report. Optional so a
+   * claims implementation without synthesis needs no opinion about it.
+   */
+  synthesis?: unknown;
 }
 
 export interface QueueOptions {
@@ -131,7 +138,9 @@ export interface QueueOptions {
    * below it. Measured 2026-08-22 on a real run. A report that contradicts its
    * own working is worse than one that says nothing.
    */
-  claimsFor(outcome: RunOutcome, terms: readonly string[]): Promise<ReportClaims>;
+  /* The key label rides along because synthesis is metered per caller, and
+   * the quota to check and charge is that caller's, never the run's. */
+  claimsFor(outcome: RunOutcome, terms: readonly string[], keyLabel: string): Promise<ReportClaims>;
   /*
    * How many retrievals may run at once, across every caller.
    *
@@ -285,6 +294,7 @@ export interface ReportSnapshot {
   findings: unknown[];
   weakSignals: unknown[];
   rejected: unknown[];
+  synthesis: unknown;
   sufficiency: unknown;
   receiptCheck: unknown;
   trends: unknown[];
@@ -450,7 +460,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       if (!report || report.status === 'cancelled') continue;
       if (!outcome) { await finishReport(report, 'failed', run.error ?? 'the run did not complete'); continue; }
       try {
-        report.claims = await options.claimsFor(outcome, report.request.terms);
+        report.claims = await options.claimsFor(outcome, report.request.terms, report.keyLabel);
         for (const finding of report.claims.findings) emit(report, 'finding', finding);
         await finishReport(report, 'complete', null);
       } catch (cause) {
@@ -544,6 +554,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       findings: claims?.findings ?? [],
       weakSignals: claims?.weakSignals ?? [],
       rejected: claims?.rejected ?? [],
+      synthesis: claims?.synthesis ?? null,
       sufficiency: claims?.sufficiency ?? null,
       receiptCheck: claims?.receiptCheck ?? null,
       trends: claims?.trends ?? [],
