@@ -19,6 +19,7 @@ import { createAppStoreSource } from './appstore/index.ts';
 import { createArcticShiftSource } from './reddit-arcticshift/index.ts';
 import { createCpscSource } from './cpsc/index.ts';
 import { createEuSafetyGateSource } from './eu-safety-gate/index.ts';
+import { createGithubIssuesSource } from './github-issues/index.ts';
 import { createHackerNewsSource } from './hackernews/index.ts';
 import { createMetaAdsApifySource } from './meta-ads/apify.ts';
 import { createNhtsaSource } from './nhtsa/index.ts';
@@ -27,7 +28,7 @@ import { createSecEdgarSource } from './sec-edgar/index.ts';
 
 /* Every free source, in the order a run should try them. */
 export const SOURCE_IDS = [
-  'reddit', 'hackernews', 'appstore', 'cpsc', 'openfda', 'nhtsa', 'sec-edgar', 'eu-safety-gate',
+  'reddit', 'hackernews', 'github', 'appstore', 'cpsc', 'openfda', 'nhtsa', 'sec-edgar', 'eu-safety-gate',
 ] as const;
 
 /*
@@ -44,6 +45,7 @@ export function makeSource(id: string): Source {
   switch (id) {
     case 'reddit': return createArcticShiftSource();
     case 'hackernews': return createHackerNewsSource();
+    case 'github': return createGithubIssuesSource();
     case 'cpsc': return createCpscSource();
     case 'openfda': return createOpenFdaSource();
     case 'nhtsa': return createNhtsaSource();

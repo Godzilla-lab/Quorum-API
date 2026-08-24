@@ -182,6 +182,11 @@ const CREDENTIALLED_VENDORS = new Map([
   ['packages/llm/src/vision.ts', 'openrouter.ai'],
   ['packages/llm/src/expand.ts', 'openrouter.ai'],
   ['packages/llm/src/claims.ts', 'openrouter.ai'],
+  /* The official GitHub REST API used as documented. Keyless works and is the
+   * default; a GITHUB_TOKEN only raises the rate limit. Not scraping: the
+   * never-authenticate rule protects the logged out posture on scraped
+   * sources, and a vendor's documented API is the other category. */
+  ['packages/sources/src/github-issues/index.ts', 'api.github.com'],
 ]);
 
 /*
