@@ -27,7 +27,7 @@ export type { AddressVerdict } from './http/ip-guard.ts';
 export { MAX_GAP_MS, MIN_GAP_MS, createThrottle, isOverloadMessage, resetSharedThrottles, sharedThrottle } from './throttle.ts';
 export type { Throttle, ThrottleOptions } from './throttle.ts';
 
-export { isRelevantRecord, matchesSubjectPhrase, scoreHandle, scoreText, subjectTerms } from './relevance.ts';
+export { isRelevantRecord, matchesSubjectPhrase, normaliseContextTerms, scoreHandle, scoreText, subjectTerms } from './relevance.ts';
 export type { RelevanceHit, RecordGateOptions } from './relevance.ts';
 
 export { runSourceConformance, fakeCostMeter, makeCtx } from './conformance.ts';

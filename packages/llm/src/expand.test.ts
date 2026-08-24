@@ -84,6 +84,28 @@ test('junk entries are dropped rather than passed on as domains to try', () => {
   assert.equal(e.category, null, 'whitespace is not a category');
 });
 
+test('context terms come through, and a chatty model is bounded at twenty', () => {
+  const chatty = JSON.stringify({
+    brands: [], category: 'running shoe', aliases: [],
+    context: Array.from({ length: 30 }, (_, i) => `word${i}`),
+  });
+  const e = parseExpansion(chatty, 'm')!;
+  assert.equal(e.context.length, 20,
+    'an unbounded list turns the vouched record check into "contains any common word"');
+});
+
+test('a model that omits context still expands, with an empty list', () => {
+  const e = parseExpansion('{"brands":["Allbirds"],"category":null,"aliases":[]}', 'm')!;
+  assert.deepEqual(e.context, []);
+});
+
+/* Vocabulary alone is still a useful expansion: it is the input the vouched
+ * record check runs on, even when no brand or category was guessed. */
+test('context alone is a usable expansion, not an empty one', () => {
+  const e = parseExpansion('{"brands":[],"category":null,"aliases":[],"context":["sizing","cushioning"]}', 'm');
+  assert.deepEqual(e?.context, ['sizing', 'cushioning']);
+});
+
 /*
  * Measured live 2026-08-22: asked about "wool runner" the model returned no
  * brands at all, which is the prompt working. Restraint has a recall cost and

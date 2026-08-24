@@ -35,7 +35,7 @@ import { openPostgres } from './postgres.ts';
 import { createJobQueue, type ReportRequest, type RunOutcome } from './jobs.ts';
 import { checkInstanceSecret, createWebhookWorker } from './webhooks.ts';
 import { runCorpusOpener } from './run-corpus.ts';
-import { askClaimsLive, claimsConfigured } from '@quorum/llm';
+import { askClaimsLive, claimsConfigured, expandSubjectLive } from '@quorum/llm';
 import type { RetrievalResult } from '@quorum/core';
 import { computeClaims } from './claims.ts';
 
@@ -288,6 +288,19 @@ const queue = createJobQueue({
         makeSource,
         makeAdSource,
         findProductByName: (name) => findProductByName(name, { timeoutMs: 15_000 }),
+        /*
+         * The same expansion hook the CLI wires, and the hosted path went
+         * without it until 2026-08-24: no community discovery hints and no
+         * buyer vocabulary for the gate's vouched record check. Free models,
+         * $0, so it sits outside the quota machinery. Null rather than a
+         * throw: a missing key degrades a run and never fails it.
+         */
+        expandSubject: async (subjectName) => {
+          const result = await expandSubjectLive(subjectName, process.env, { timeoutMs: 30_000 });
+          if (!result.ok || !result.expansion) return null;
+          const { brands, category, aliases, context, model } = result.expansion;
+          return { brands, category, aliases, context, model };
+        },
         env: process.env,
         signal: ctx.signal,
         onProgress: (line) => ctx.onStage('progress', line),

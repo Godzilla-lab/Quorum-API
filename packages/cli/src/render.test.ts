@@ -342,7 +342,7 @@ test('a thin run is labelled differently from one that found nothing', () => {
  */
 test('a model guess is shown and is labelled as a guess', () => {
   const text = renderText(result({
-    hints: { brands: ['Allbirds'], category: 'running shoe', aliases: [], model: 'some/model:free' },
+    hints: { brands: ['Allbirds'], category: 'running shoe', aliases: [], context: [], model: 'some/model:free' },
   }));
   assert.match(text, /guessed by some\/model:free: running shoe; brands Allbirds/);
   assert.match(text, /never about what is true/);

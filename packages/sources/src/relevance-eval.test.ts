@@ -19,10 +19,10 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { isRelevantRecord, subjectTerms } from './relevance.ts';
+import { isRelevantRecord, normaliseContextTerms, subjectTerms } from './relevance.ts';
 
 const EVALS_DIR = fileURLToPath(new URL('../../../evals/relevance/', import.meta.url));
 
@@ -42,13 +42,24 @@ interface SubjectSpec {
   phrases: string[];
 }
 
+/*
+ * A frozen plan time expansion, captured live once and committed, so the
+ * harness measures the gate a run with a working key actually gets. Optional:
+ * a subject without one measures the keyless gate, which is also shipped.
+ */
+interface HintsFixture {
+  context: string[];
+  model: string;
+  capturedAt: string;
+}
+
 interface Scores {
   records: number;
   precision: number;
   recall: number;
 }
 
-function loadSubjects(): { spec: SubjectSpec; labels: Label[] }[] {
+function loadSubjects(): { spec: SubjectSpec; labels: Label[]; hints: HintsFixture | null }[] {
   return readdirSync(EVALS_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
@@ -58,12 +69,19 @@ function loadSubjects(): { spec: SubjectSpec; labels: Label[] }[] {
         .split('\n')
         .filter((line) => line.trim())
         .map((line) => JSON.parse(line) as Label);
-      return { spec, labels };
+      const hintsPath = join(dir, 'hints.json');
+      const hints = existsSync(hintsPath)
+        ? JSON.parse(readFileSync(hintsPath, 'utf8')) as HintsFixture
+        : null;
+      return { spec, labels, hints };
     });
 }
 
-function score(spec: SubjectSpec, labels: Label[]): Scores {
+function score(spec: SubjectSpec, labels: Label[], hints: HintsFixture | null): Scores {
   const terms = subjectTerms(spec.phrases);
+  /* The exact normalisation run.ts applies before the plan, shared so the
+   * harness cannot measure a gate nobody ships. */
+  const contextTerms = normaliseContextTerms(hints?.context ?? [], terms);
   let truePositives = 0;
   let falsePositives = 0;
   let falseNegatives = 0;
@@ -73,6 +91,7 @@ function score(spec: SubjectSpec, labels: Label[]): Scores {
       mode: label.mode,
       channelKind: label.channelKind,
       phrases: spec.phrases,
+      ...(contextTerms.length ? { contextTerms } : {}),
     });
     if (passed && label.relevant) truePositives++;
     if (passed && !label.relevant) falsePositives++;
@@ -98,9 +117,9 @@ test('every subject in evals/relevance has a committed baseline, and the reverse
   assert.deepEqual(Object.keys(baseline).sort(), measured);
 });
 
-for (const { spec, labels } of subjects) {
+for (const { spec, labels, hints } of subjects) {
   test(`relevance gate holds its measured floor on "${spec.slug}"`, () => {
-    const scores = score(spec, labels);
+    const scores = score(spec, labels, hints);
     const floor = baseline[spec.slug]!;
 
     /* Printed so a calibration session can read the live numbers without

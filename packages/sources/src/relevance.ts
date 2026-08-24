@@ -246,6 +246,69 @@ export interface RecordGateOptions {
    * runner" report. See isRelevantRecord.
    */
   channelKind?: 'title' | 'handle';
+
+  /*
+   * The vocabulary a buyer uses when actually discussing the subject, guessed
+   * by a model at plan time and used ONLY TO NARROW. On a subject of one
+   * tokenizable word or none, a record whose own text never names the subject
+   * must show at least one of these words to keep the pass its container
+   * vouched for. Absent (offline, keyless, expansion failed), the gate
+   * behaves exactly as it did without the field.
+   */
+  contextTerms?: string[];
+}
+
+/*
+ * Does a record that passed on its container's word alone say anything about
+ * the subject in its own words.
+ *
+ * WHY THE GATE ACCEPTS A MODEL'S GUESS HERE AND NOWHERE ELSE. The failure this
+ * closes was measured 2026-08-23: a "love" run stored 2544 of 2544 records
+ * seen, because every record in r/love passes a gate whose only requirement
+ * the community name itself satisfies. The container was doing all the work,
+ * and on a one word subject the container is about whatever it is about, not
+ * the subject as asked.
+ *
+ * A context term requirement is safe where an expansion elsewhere would not
+ * be, because it points one way. A record the current gate rejects is still
+ * rejected: context terms are never consulted for it. A record the gate would
+ * accept on the container's word must now also use one word a buyer would use
+ * about the subject. Reality TV chatter in r/love carries none of the
+ * vocabulary of any product and stops being evidence.
+ *
+ * APPLIED ONLY WHEN THE SUBJECT IS ONE TOKENIZABLE WORD OR NONE. Measured on
+ * the evals/relevance sets, 2026-08-24: on "love" the check moved precision
+ * from 0.286 to 0.500 at unchanged recall, and on "running shoes" it rejected
+ * ZERO false positives while losing two real records, including the canonical
+ * "Same, had to size up" (the model said "sizing", the text says "size", and
+ * lexical matching cannot bridge them). The difference is the strength of the
+ * vouch: a container carrying a two word subject in its name is a community
+ * literally named for the subject, while a one word match is an accident of
+ * naming, r/love or r/woolworths. So multi word subjects keep their vouch and
+ * weak ones must hear the buyer's vocabulary in the record itself.
+ *
+ * Live smoke 2026-08-24, fresh corpora: a "love" run's reddit leg, where the
+ * original failure stored everything, rejected 144 of 151 records and stored
+ * 7. A "running shoes" control kept its container vouch, 1141 of 1141 reddit
+ * records stored, findings unchanged. What remains on "love" is records whose
+ * own text genuinely contains the word, which self vouch and are beyond any
+ * lexical gate; the subject too broad sufficiency warning covers that class.
+ */
+function vouchedRecordSpeaksForItself(text: string, contextTerms: string[]): boolean {
+  if (!contextTerms.length) return true;
+  return scoreText(text, contextTerms).hits >= 1;
+}
+
+/*
+ * The normalisation every caller must apply before handing buyer vocabulary
+ * to the gate: the gate's own tokeniser, so the term length floor holds, and
+ * subject words dropped, because a record whose text carries one vouches for
+ * itself already and leaving them in would only dilute the requirement.
+ * Shared so the evals harness cannot drift from what a run actually ships.
+ */
+export function normaliseContextTerms(raw: string[], subjectWords: string[]): string[] {
+  const subject = new Set(subjectWords);
+  return subjectTerms(raw).filter((t) => !subject.has(t));
 }
 
 /*
@@ -260,7 +323,7 @@ export function isRelevantRecord(
   text: string,
   channel: string,
   terms: string[],
-  { minHits = 1, mode = 'terms', phrases = [], channelKind = 'title' }: RecordGateOptions = {},
+  { minHits = 1, mode = 'terms', phrases = [], channelKind = 'title', contextTerms = [] }: RecordGateOptions = {},
 ): boolean {
   /*
    * THE CHANNEL SUPPLIES SOME OF THE SUBJECT. THE RECORD SUPPLIES THE REST.
@@ -300,6 +363,20 @@ export function isRelevantRecord(
     : scoreText(channel, terms).hits;
 
   /*
+   * A PASS THE CONTAINER VOUCHED FOR MUST STILL SAY SOMETHING ITSELF, when
+   * the subject is too weak to make the vouch mean anything. A record whose
+   * own text carries a subject word vouches for itself and this is vacuously
+   * true, as is any record under a multi word subject, whose container had to
+   * carry the whole subject to vouch at all. Applied only on the accepting
+   * paths where the container did the vouching; the paths that already
+   * require the subject in the text satisfy it by construction. See
+   * vouchedRecordSpeaksForItself for the measurement behind the scoping.
+   */
+  const textHits = scoreText(text, terms).hits;
+  const vouchOk = terms.length > 1 || textHits > 0
+    || vouchedRecordSpeaksForItself(text, contextTerms);
+
+  /*
    * Strict mode, for general forums where a question term means whatever it
    * means to that audience. Requires the subject as a phrase, not as scattered
    * words. See matchesSubjectPhrase for the measurement behind this.
@@ -335,7 +412,7 @@ export function isRelevantRecord(
      * being discussed. "Same, had to size up half a size" is a real answer under
      * "Best running shoes for wide feet?" and carries no subject word at all.
      */
-    if (scoreText(channel, terms).hits > 0 || matchesSubjectPhrase(channel, phrases)) return true;
+    if (scoreText(channel, terms).hits > 0 || matchesSubjectPhrase(channel, phrases)) return vouchOk;
 
     /* The thread is about something else, so the record has to be about the
      * subject on its own. See the note above on focus rather than repetition. */
@@ -343,8 +420,13 @@ export function isRelevantRecord(
     return countSubjectPhrase(text, phrases) >= needed;
   }
 
-  if (!terms.length) return true;
+  /*
+   * A subject too short to tokenize gates on nothing, which used to mean
+   * everything passed silently. With planner vocabulary available, a record
+   * at least has to sound like a buyer talking about the thing.
+   */
+  if (!terms.length) return vouchOk;
 
   const required = Math.max(minHits, Math.min(terms.length, 2));
-  return scoreText(text, terms).hits + channelHits >= required;
+  return textHits + channelHits >= required && vouchOk;
 }

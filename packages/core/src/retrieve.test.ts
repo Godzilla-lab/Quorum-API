@@ -217,6 +217,41 @@ test('off topic records are gated out before they reach the corpus', async () =>
   await corpus.close();
 });
 
+/*
+ * The vouched record check, at the backstop. On a one word subject a record
+ * whose text never names the subject passes on its container's word, and with
+ * planner vocabulary on the plan it must also use one of those words. See
+ * vouchedRecordSpeaksForItself in relevance.ts for the measured scoping.
+ */
+test('plan context terms reach the backstop gate and reject empty vouched records', async () => {
+  const weakPlan: PlanInput = {
+    category: 'love', productTitle: 'love', productUrl: '', terms: ['dating'],
+  };
+  const vouched = () => [
+    record(1, { text: 'Met my partner through a climbing club', channel: 'lovewins' }),
+    record(2, { text: 'The producers clearly scripted that whole fight', channel: 'lovewins' }),
+  ];
+
+  const corpus = freshCorpus();
+  const bare = await retrieveAll({
+    sources: [makeSource('a', { queries: [{ text: 'dating' }], records: vouched })],
+    corpus, plan: weakPlan, ctx: makeCtx(),
+  });
+  assert.equal(bare.totalWritten, 2, 'without vocabulary the container vouches for both');
+
+  const second = freshCorpus();
+  const informed = await retrieveAll({
+    sources: [makeSource('a', { queries: [{ text: 'dating' }], records: vouched })],
+    corpus: second,
+    plan: { ...weakPlan, contextTerms: ['partner', 'dating'] },
+    ctx: makeCtx(),
+  });
+  assert.equal(informed.outcomes[0]?.recordsGated, 1, 'the reality TV chatter is out');
+  assert.equal(informed.totalWritten, 1, 'the record speaking the buyer vocabulary survives');
+  await corpus.close();
+  await second.close();
+});
+
 test('a source whose records are all off topic is reported as degraded', async () => {
   const corpus = freshCorpus();
   const source = makeSource('offtopic', {

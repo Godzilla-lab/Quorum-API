@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { openSqliteCorpus, type CorpusDriver, type Doc } from '@quorum/corpus';
-import type { Source, SourceRecord, Subject } from '@quorum/sources';
+import type { PlanInput, Source, SourceRecord, Subject } from '@quorum/sources';
 import type { CliOptions } from './args.ts';
 import { RATES, isCallRate, type AskModel } from '@quorum/core';
 import { runResearch, runWithComparison, type ImageReading, type RunDeps } from './run.ts';
@@ -126,6 +126,28 @@ test('a run stores evidence, and a corroborated term becomes a finding', async (
   assert.equal(quality?.records, 3);
   assert.equal(quality?.channels, 3);
   assert.equal(quality?.verdict, 'finding');
+});
+
+/*
+ * The one hint the gate consumes. Normalised through the gate's own tokeniser
+ * and stripped of subject words, so the vouched record check runs on real
+ * buyer vocabulary rather than on whatever casing the model chose.
+ */
+test('planner vocabulary reaches the retrieval plan, normalised and without subject words', async () => {
+  let seen: PlanInput | undefined;
+  await runResearch(options(), deps({
+    makeSource: () => sourceYielding('reddit', CORPUS_RECORDS, {
+      plan: async (input) => { seen = input; return [{ text: 'shoes' }]; },
+    }),
+    expandSubject: async () => ({
+      brands: [], category: null, aliases: [],
+      context: ['Cushioning', 'shoes', 'fit', 'sizing', 'cushioning'],
+      model: 'some/model:free',
+    }),
+  }));
+
+  assert.deepEqual(seen?.contextTerms, ['cushioning', 'sizing'],
+    'lowercased and deduped; "fit" is under the term floor and "shoes" is the subject vouching for itself');
 });
 
 test('a term with two receipts is a weak signal and is never cited as a finding', async () => {

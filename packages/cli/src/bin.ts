@@ -144,8 +144,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       expandSubject: async (subject) => {
         const result = await expandSubjectLive(subject, process.env, { timeoutMs: 30_000 });
         if (!result.ok || !result.expansion) return null;
-        const { brands, category, aliases, model } = result.expansion;
-        return { brands, category, aliases, model };
+        const { brands, category, aliases, context, model } = result.expansion;
+        return { brands, category, aliases, context, model };
       },
       /*
        * Only ever called when --read-images was passed. Same contract as the

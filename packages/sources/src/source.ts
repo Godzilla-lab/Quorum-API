@@ -47,6 +47,16 @@ export interface PlanInput {
    * one that does falls back to the words in the category.
    */
   subredditTerms?: string[];
+
+  /*
+   * The vocabulary a buyer uses when discussing the subject, guessed by the
+   * plan time expansion. Consumed by the record gate to demand that a record
+   * passing on its container's word alone says something about the subject
+   * itself. TIGHTENS ONLY: absent means the gate behaves as it always did,
+   * and its presence can never admit a record the gate would have rejected.
+   * See isRelevantRecord in relevance.ts.
+   */
+  contextTerms?: string[];
 }
 
 export interface Query {

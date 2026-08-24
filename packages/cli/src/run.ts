@@ -15,7 +15,7 @@
 
 import type { CategoryStats, CorpusDriver, Doc } from '@quorum/corpus';
 import {
-  brandCandidates, looksLikeUrl, subjectTerms,
+  brandCandidates, looksLikeUrl, normaliseContextTerms, subjectTerms,
   type AdSource, type NameResolution, type Source, type Subject,
 } from '@quorum/sources';
 import {
@@ -39,6 +39,13 @@ export interface SubjectHints {
   brands: string[];
   category: string | null;
   aliases: string[];
+  /*
+   * Words a buyer uses when actually discussing the subject. The one hint that
+   * reaches the relevance gate, and only to tighten it: a record passing on
+   * its container's word alone must use one of these. See the plan wiring
+   * below for why that cannot widen what counts as evidence.
+   */
+  context: string[];
   /* Which model guessed, because a guess with no author is not checkable. */
   model: string;
 }
@@ -342,9 +349,15 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
      * that then resolves to a real product.
      *
      * IT CANNOT WIDEN WHAT COUNTS AS EVIDENCE. The hints feed `subredditTerms`,
-     * which is WHERE to look, and never the relevance gate, which is WHAT is on
-     * topic. If the model decides a wool runner is a sock, sock records are
-     * still gated out against the subject as typed.
+     * which is WHERE to look, and the relevance gate still runs against the
+     * subject as typed. If the model decides a wool runner is a sock, sock
+     * records are still gated out.
+     *
+     * The one hint the gate consumes is `context`, and it points the other
+     * way: it is an EXTRA requirement on records that would pass purely on
+     * their container's word, so it can only reject more, never admit more.
+     * The failure it closes was measured 2026-08-23: a "love" run stored 2544
+     * of 2544 records because r/love vouched for reality TV chatter.
      */
     let hints: SubjectHints | null = null;
     if (!options.offline && subject.source === 'text' && deps.expandSubject) {
@@ -383,6 +396,16 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
     ].map((t) => t.trim().toLowerCase()).filter((t) => t.length > 2))];
 
     /*
+     * Buyer vocabulary for the gate's vouched record check on weak subjects.
+     * The normalisation lives next to the gate so the evals harness measures
+     * exactly what ships here.
+     */
+    const contextTerms = normaliseContextTerms(
+      hints?.context ?? [],
+      subjectTerms([category, subject.title || category]),
+    );
+
+    /*
      * Only worth storing when a page was actually read. A url-fallback subject
      * is derived from the URL string with no network, so caching it would save
      * nothing and would keep us from retrying a store that is back up.
@@ -404,6 +427,7 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
           productUrl: subject.url ?? '',
           terms: options.terms,
           ...(discoveryTerms.length ? { subredditTerms: discoveryTerms } : {}),
+          ...(contextTerms.length ? { contextTerms } : {}),
         },
         ctx: {
           env: deps.env ?? {},

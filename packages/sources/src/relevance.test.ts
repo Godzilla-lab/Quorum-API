@@ -325,3 +325,107 @@ test('the focus requirement scales with length rather than being a fixed count',
   assert.equal(HN(long, 'Ask HN: what do you buy'), false,
     'the same sentence buried in an essay about something else is an aside');
 });
+
+/*
+ * THE VOUCHED RECORD CHECK.
+ *
+ * Measured live 2026-08-23: a run on "love" stored 2544 of 2544 records seen,
+ * because every record in a community with love in its name passes a gate
+ * whose only requirement the community name satisfies. With buyer vocabulary
+ * from the planner, a record passing on its container's word alone must use
+ * at least one of those words itself.
+ */
+test('a vouched record with none of the buyer vocabulary is rejected', () => {
+  const terms = subjectTerms(['love', 'love']);
+  const context = ['relationship', 'partner', 'dating'];
+  assert.equal(
+    isRelevantRecord('Did anyone else watch last night? The producers clearly scripted that whole fight.',
+      'lovewins', terms, { channelKind: 'handle', contextTerms: context }),
+    false,
+    'reality TV chatter in r/love is about the show, not the subject',
+  );
+});
+
+test('a vouched record that speaks the buyer vocabulary is kept', () => {
+  const terms = subjectTerms(['skincare', 'skincare']);
+  assert.equal(
+    isRelevantRecord('this moisturizer broke me out badly', 'skincareaddiction', terms,
+      { channelKind: 'handle', contextTerms: ['moisturizer', 'routine', 'acne'] }),
+    true,
+    'an elliptical comment using real buyer vocabulary is the voice this product exists to find',
+  );
+});
+
+test('a record naming the subject itself never consults the vocabulary', () => {
+  const terms = subjectTerms(['skincare', 'skincare']);
+  assert.equal(
+    isRelevantRecord('my skincare routine changed', 'acne', terms,
+      { channelKind: 'handle', contextTerms: ['moisturizer'] }),
+    true,
+    'the text vouches for itself, so a narrow vocabulary cannot cost it',
+  );
+});
+
+/*
+ * Measured 2026-08-24 on the evals/relevance sets: applied to "running
+ * shoes", the check rejected zero false positives and lost two real records,
+ * including the canonical "Same, had to size up". A container that carries a
+ * two word subject in its name is a community literally named for the
+ * subject, so its vouch stands without the vocabulary.
+ */
+test('a multi word subject keeps its container vouch, vocabulary or not', () => {
+  const terms = subjectTerms(['running shoes', 'running shoes']);
+  assert.equal(
+    isRelevantRecord('Same, had to size up', 'runningshoegeeks', terms,
+      { channelKind: 'handle', contextTerms: ['cushioning', 'sizing'] }),
+    true,
+    'neither context word appears in the text, and the vouch still stands',
+  );
+});
+
+test('without vocabulary the gate is exactly what it was', () => {
+  const terms = subjectTerms(['love', 'love']);
+  assert.equal(
+    isRelevantRecord('Did anyone else watch last night?', 'lovewins', terms, { channelKind: 'handle' }),
+    true,
+    'offline and keyless runs degrade to the old gate rather than failing',
+  );
+});
+
+/* The no widening proof: vocabulary is only ever an extra requirement. */
+test('a context term cannot rescue a record whose container did not vouch', () => {
+  const terms = subjectTerms(['wool runner', 'wool runner']);
+  assert.equal(
+    isRelevantRecord('the sizing on these is generous', 'woolworths', terms,
+      { channelKind: 'handle', contextTerms: ['sizing'] }),
+    false,
+    'a supermarket comment about sizing is not about wool runners however apt the word',
+  );
+});
+
+test('the vouched record check applies to a weak subject in phrase mode too', () => {
+  const opts = { mode: 'phrase' as const, phrases: ['love'], contextTerms: ['partner', 'dating'] };
+  const terms = subjectTerms(['love']);
+  assert.equal(
+    isRelevantRecord('lol underrated comment', 'Ask HN: how do you find love?', terms, opts),
+    false, 'a contentless reply vouched by the thread title is not evidence about the subject');
+  assert.equal(
+    isRelevantRecord('Met my partner through a climbing club, not an app', 'Ask HN: how do you find love?', terms, opts),
+    true, 'the real answer under the same thread survives');
+});
+
+/*
+ * A subject too short to tokenize gates on nothing and used to pass
+ * everything silently. Vocabulary gives it a floor.
+ */
+test('a subject with no tokenizable terms at least demands the vocabulary', () => {
+  assert.equal(isRelevantRecord('anything at all', 'ivy', [], { channelKind: 'handle' }), true,
+    'without vocabulary the old silent pass stands');
+  assert.equal(
+    isRelevantRecord('anything at all', 'ivy', [], { channelKind: 'handle', contextTerms: ['plant', 'leaves'] }),
+    false);
+  assert.equal(
+    isRelevantRecord('my ivy plant keeps dropping leaves', 'ivy', [],
+      { channelKind: 'handle', contextTerms: ['plant', 'leaves'] }),
+    true);
+});

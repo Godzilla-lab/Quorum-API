@@ -31,6 +31,16 @@
  *
  * So the worst case for a wrong guess is a wasted request, and the worst case
  * for a right one is that a niche product becomes researchable.
+ *
+ * CONTEXT TERMS ARE THE ONE PLACE EXPANSION TOUCHES THE GATE, AND ONLY TO
+ * NARROW IT. A record whose own text never names the subject can pass the gate
+ * on its container's word alone (a community name, a thread title). Measured
+ * 2026-08-23: a "love" run stored 2544 of 2544 records seen, because r/love
+ * vouched for reality TV chatter. Context terms are the vocabulary a buyer
+ * actually uses about the product, and on a subject that weak, a vouched
+ * record must show at least one of them in its own text. A wrong or missing
+ * context list leaves the gate exactly as strict as it was; it can reject
+ * more, never admit more. The scoping measurement lives in relevance.ts.
  */
 
 import type { Env } from '@quorum/sources';
@@ -51,6 +61,13 @@ export interface SubjectExpansion {
   category: string | null;
   /* Other names for the same thing, for finding communities. */
   aliases: string[];
+  /*
+   * Words a buyer uses when actually discussing this product: actions,
+   * attributes, complaint vocabulary. Used to demand that a record passing on
+   * its container's word alone says SOMETHING about the subject itself. Only
+   * ever tightens the gate. See the header.
+   */
+  context: string[];
   /* Which model said it, because a guess with no author is not checkable. */
   model: string;
   /* ALWAYS TRUE. This is a hint, never a fact. See the header. */
@@ -72,12 +89,15 @@ const PROMPT = (subject: string): string =>
   'You are helping a market research tool decide where to look. '
   + `The user typed this product name: ${JSON.stringify(subject)}\n\n`
   + 'Reply with ONLY a JSON object, no prose and no code fence:\n'
-  + '{"brands":[],"category":null,"aliases":[]}\n\n'
+  + '{"brands":[],"category":null,"aliases":[],"context":[]}\n\n'
   + 'brands: up to 3 companies that actually make a product by this name. '
   + 'If you are not confident, return an empty list. Do not guess.\n'
   + 'category: what kind of product this is, two or three words a shopper would '
   + 'use, or null if unclear.\n'
-  + 'aliases: up to 3 other common names for the same kind of product.';
+  + 'aliases: up to 3 other common names for the same kind of product.\n'
+  + 'context: 10 to 20 single words a buyer uses when discussing this product, '
+  + 'such as its parts, attributes, actions and common complaints. Words that '
+  + 'would appear in a real customer comment about it, not marketing words.';
 
 export interface ExpandOptions {
   model?: string;
@@ -98,6 +118,10 @@ const WORTH_FAILING_OVER = new Set([402, 403, 404, 408, 429, 500, 502, 503, 504]
  * every extra brand is a real request to a stranger's host. */
 const MAX_BRANDS = 3;
 const MAX_ALIASES = 3;
+/* Context terms cost nothing per term, but an unbounded list from a chatty
+ * model would turn the vouched record requirement into "contains any common
+ * word", which is no requirement at all. */
+const MAX_CONTEXT = 20;
 
 const strings = (v: unknown, limit: number): string[] =>
   Array.isArray(v)
@@ -116,7 +140,7 @@ export function parseExpansion(raw: string, model: string): SubjectExpansion | n
   const end = cleaned.lastIndexOf('}');
   if (start === -1 || end <= start) return null;
 
-  let parsed: { brands?: unknown; category?: unknown; aliases?: unknown };
+  let parsed: { brands?: unknown; category?: unknown; aliases?: unknown; context?: unknown };
   try {
     parsed = JSON.parse(cleaned.slice(start, end + 1)) as typeof parsed;
   } catch {
@@ -131,12 +155,14 @@ export function parseExpansion(raw: string, model: string): SubjectExpansion | n
     brands: strings(parsed.brands, MAX_BRANDS),
     category,
     aliases: strings(parsed.aliases, MAX_ALIASES),
+    context: strings(parsed.context, MAX_CONTEXT),
     model,
     derived: true,
   };
 
   /* An expansion that suggests nothing is not an expansion. */
-  if (!expansion.brands.length && !expansion.category && !expansion.aliases.length) return null;
+  if (!expansion.brands.length && !expansion.category && !expansion.aliases.length
+    && !expansion.context.length) return null;
   return expansion;
 }
 

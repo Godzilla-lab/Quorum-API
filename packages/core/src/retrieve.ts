@@ -239,6 +239,13 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
              * matches one subject word vouches for every record in it.
              */
             channelKind: source.channelKind,
+            /*
+             * Planner vocabulary, when a run has it. A record passing on its
+             * container's word alone must use at least one of these words.
+             * The backstop gates every record before it is written, so this
+             * one site covers every source.
+             */
+            ...(plan.contextTerms?.length ? { contextTerms: plan.contextTerms } : {}),
           })) {
             outcome.recordsGated++;
             continue;

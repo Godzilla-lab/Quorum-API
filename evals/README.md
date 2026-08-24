@@ -18,6 +18,19 @@ holds one record per line, hand labelled:
 record would use, because the gate is calibrated per source and measuring it
 under the wrong options measures nothing.
 
+An optional `hints.json` freezes the plan time expansion a run with a working
+key gets, so the harness measures the shipped gate including the vouched
+record check on weak subjects:
+
+```json
+{"context": ["romantic", "gift", "heart"], "model": "some/model:free",
+ "capturedAt": "2026-08-24"}
+```
+
+Captured live once and committed. A subject without one measures the keyless
+gate, which is also shipped. Recapturing is a calibration change: re-measure
+and move the baseline in the same commit.
+
 The runner is `packages/sources/src/relevance-eval.test.ts`, so `npm test`
 scores every subject offline and asserts the floors in
 `relevance/baseline.json`. The floors are the MEASURED performance of the
