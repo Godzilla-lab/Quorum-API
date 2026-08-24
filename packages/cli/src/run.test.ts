@@ -146,8 +146,9 @@ test('planner vocabulary reaches the retrieval plan, normalised and without subj
     }),
   }));
 
-  assert.deepEqual(seen?.contextTerms, ['cushioning', 'sizing'],
-    'lowercased and deduped; "fit" is under the term floor and "shoes" is the subject vouching for itself');
+  assert.deepEqual(seen?.contextTerms, ['cushioning', 'fit', 'sizing'],
+    'lowercased and deduped; "fit" is a real three letter buyer word since the '
+    + 'dog food fix, and "shoes" is the subject vouching for itself');
 });
 
 test('a term with two receipts is a weak signal and is never cited as a finding', async () => {

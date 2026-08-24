@@ -16,10 +16,14 @@ test('the subject is the category, never the question terms', () => {
   assert.equal(TERMS.includes('sizing'), false, 'searching for sizing then gating on sizing is circular');
 });
 
-test('subject terms drop short words that would match anything', () => {
+test('subject terms keep short words as exact terms and drop only grammar', () => {
   assert.deepEqual(subjectTerms(['running shoes']), ['running', 'shoes']);
-  assert.deepEqual(subjectTerms(["men's tee"]), [], 'men and tee are both too short to be safe');
-  assert.deepEqual(subjectTerms(['a to at the']), []);
+  /* Three letter words are terms now (dropping them turned "dog food" into a
+   * search for "food"), matched exactly rather than as prefixes, so "men"
+   * still cannot match "mental". One and two letter words stay dropped. */
+  assert.deepEqual(subjectTerms(["men's tee"]), ['men', 'tee']);
+  assert.deepEqual(subjectTerms(['a to at the']), [], 'pure grammar never becomes a subject');
+  assert.deepEqual(subjectTerms(['the dog and the food']), ['dog', 'food']);
 });
 
 test('duplicate words across phrases become one term', () => {
@@ -231,6 +235,38 @@ test('phrase mode gets the same channel treatment', () => {
  * finding. A handle vouches for nothing, so its records get the same focus
  * rule an off topic thread gets.
  */
+/*
+ * Regression, found 2026-08-24 by resolving receipts blind after a warming
+ * sprint. Words under four letters were dropped entirely, so "dog food"
+ * gated as ["food"] and the category stored CPSC recalls for pressure
+ * cookers and food processors. A short word is half the subject's identity:
+ * it becomes an exact match term, never a prefix.
+ */
+test('A SHORT SUBJECT WORD COUNTS AS A WORD, AND NEVER AS A PREFIX', () => {
+  assert.deepEqual(subjectTerms(['dog food', 'dog food']), ['dog', 'food']);
+  assert.deepEqual(subjectTerms(['yoga mat', 'yoga mat']), ['yoga', 'mat']);
+  assert.deepEqual(subjectTerms(['rain guard for cars', 'rain guard for cars']),
+    ['rain', 'guard', 'cars'], 'grammar words never become subject terms');
+
+  const terms = subjectTerms(['dog food', 'dog food']);
+
+  /* The measured failure: a kitchen appliance recall in the dog food
+   * category, admitted because "dog" had been discarded before any gate ran. */
+  const recall = 'SharkNinja Recalls Foodi Multi Function Pressure Cookers: food can burn users';
+  assert.equal(isRelevantRecord(recall, 'SharkNinja', terms), false,
+    'a food processor recall is not dog food evidence');
+
+  const real = 'my dog will not touch this food since the recipe change, switched brands twice';
+  assert.equal(isRelevantRecord(real, 'puppy101', terms), true,
+    'a buyer whose dog rejects the food is exactly the voice this exists to find');
+
+  /* Exact means exact: three letters must never match inside a longer word. */
+  assert.equal(scoreText('no match found in the material', ['mat']).hits, 0,
+    'mat must not match "match" or "material"');
+  assert.equal(scoreText('two mats and a mat bag', ['mat']).hits, 1,
+    'and the plural still counts');
+});
+
 test('A DUMP THAT MENTIONS THE SUBJECT ONCE IS NOT ABOUT THE SUBJECT', () => {
   const terms = subjectTerms(['running shoes', 'running shoes']);
   const opts = { mode: 'phrase' as const, phrases: ['running shoes'], channelKind: 'handle' as const };

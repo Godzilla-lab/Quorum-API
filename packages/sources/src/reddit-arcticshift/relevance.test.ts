@@ -83,12 +83,23 @@ test('a single matching word is enough, because the gate counts rather than divi
  * The length floor is what makes prefix matching safe. "men" is never a term,
  * so it can never match "mental" or "mention".
  */
-test('words of three characters or fewer never become terms', () => {
-  /* The haystack contains "mental" and "shirts". If "men" were a term it would
-   * match "mental" and inflate the score on a completely unrelated community. */
+test('a three letter word is an exact term: it matches itself and never a longer word', () => {
+  /* The haystack contains "mental" and "shirts". "men" is a real term now
+   * (dropping short words once turned "dog food" into a search for "food"),
+   * but it matches only as a whole word, so "mental" still cannot inflate the
+   * score on an unrelated community. */
   const scored = relevanceScore(sub('mentalhealth', 'mental health support, and shirts'), ["men's shirts"]);
   assert.deepEqual(scored.matched, ['shirts'], '"men" must never match "mental"');
   assert.equal(scored.hits, 1);
+
+  const exact = relevanceScore(sub('menswear', 'clothes for men, shirts included'), ["men's shirts"]);
+  assert.deepEqual(exact.matched, ['men', 'shirts'], 'the standalone word does count');
+
+  /* The measured case: "dog" survives tokenization and finds dog communities.
+   * The prose carries only "dog"; the squashed name carries both words. */
+  const dog = relevanceScore(sub('DogFood', 'what to feed your dog'), ['dog food']);
+  assert.deepEqual(dog.matched, ['dog']);
+  assert.equal(dog.handleHits, 2, 'the squashed name carries both words');
 });
 
 test('a term matches as a prefix of a longer word', () => {

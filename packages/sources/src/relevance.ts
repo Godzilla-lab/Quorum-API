@@ -25,10 +25,33 @@
  */
 
 /*
- * Words shorter than this never become terms. That floor is what makes prefix
- * matching safe: "men" is never a term, so it can never match "mental".
+ * Words this long and over match as PREFIXES. The floor is what makes prefix
+ * matching safe: "men" is never a prefix term, so it can never match "mental".
  */
 const MIN_TERM_LENGTH = 4;
+
+/*
+ * Words of exactly this length become EXACT MATCH terms rather than being
+ * dropped.
+ *
+ * MEASURED LIVE 2026-08-24, found by resolving receipts blind after a warming
+ * sprint: dropping short words entirely meant "dog food" gated as ["food"],
+ * "yoga mat" as ["yoga"] and "car seat" as ["seat"]. The dog food category
+ * then stored CPSC recalls for pressure cookers and food processors, because
+ * half the subject's identity had been silently discarded before any gate
+ * ran. A short word cannot be a prefix ("mat" must never match "match"), but
+ * it can be a word: "my dog will not eat this food" carries the subject and
+ * must count. Words of one or two letters stay dropped.
+ */
+const SHORT_TERM_LENGTH = 3;
+
+/* Three letter words that are grammar, not subject. "Rain guard for cars"
+ * must not make "for" a subject term. Deliberately tiny: a word like "dog",
+ * "car" or "gas" is exactly what this fix exists to keep. */
+const FUNCTION_WORDS = new Set([
+  'and', 'for', 'the', 'but', 'nor', 'per', 'via', 'its',
+  'are', 'was', 'has', 'had', 'not',
+]);
 
 /*
  * Terms describing WHAT IS BEING RESEARCHED. The category and the product, and
@@ -48,8 +71,26 @@ export function subjectTerms(phrases: string[]): string[] {
       .join(' ')
       .toLowerCase()
       .split(/[^a-z0-9]+/)
-      .filter((w) => w.length >= MIN_TERM_LENGTH),
+      .filter((w) => w.length >= MIN_TERM_LENGTH
+        || (w.length === SHORT_TERM_LENGTH && !FUNCTION_WORDS.has(w))),
   )];
+}
+
+/*
+ * How one term matches prose, shared by the record gate here and the
+ * subreddit scorer, so the rule cannot mean two different things in one
+ * codebase. Long terms match as word boundary prefixes, stem tolerant of a
+ * trailing plural. Short terms match as exact words with an optional plural,
+ * because a three letter prefix is a false friend factory: "mat" must find
+ * "mats" and never "match".
+ */
+export function termMatchesProse(term: string, haystack: string): boolean {
+  if (term.length < MIN_TERM_LENGTH) {
+    return new RegExp(`\\b${term}s?\\b`, 'i').test(haystack);
+  }
+  if (new RegExp(`\\b${term}`, 'i').test(haystack)) return true;
+  const stem = term.replace(/s$/, '');
+  return stem !== term && stem.length >= MIN_TERM_LENGTH && new RegExp(`\\b${stem}`, 'i').test(haystack);
 }
 
 export interface RelevanceHit {
@@ -83,11 +124,7 @@ export function scoreText(text: string, terms: string[]): RelevanceHit {
    * subreddit scorer and left here, which is how a rule ends up meaning two
    * different things in one codebase.
    */
-  const matched = terms.filter((t) => {
-    const stem = t.replace(/s$/, '');
-    if (new RegExp(`\\b${t}`, 'i').test(haystack)) return true;
-    return stem !== t && stem.length >= MIN_TERM_LENGTH && new RegExp(`\\b${stem}`, 'i').test(haystack);
-  });
+  const matched = terms.filter((t) => termMatchesProse(t, haystack));
   return { hits: matched.length, matched, ratio: matched.length / terms.length };
 }
 

@@ -21,7 +21,7 @@
  * scored and never gated on, which is deliberate and should stay that way.
  */
 
-import { scoreHandle } from '../relevance.ts';
+import { scoreHandle, subjectTerms, termMatchesProse } from '../relevance.ts';
 
 export interface SubredditCandidate {
   name: string;
@@ -52,17 +52,12 @@ export function relevanceScore(sub: SubredditCandidate, categoryTerms: string[])
   const haystack = `${sub.name} ${sub.description}`.toLowerCase();
 
   /*
-   * Terms are the distinct words across every category term, longer than three
-   * characters. The length floor is what makes the matching below safe: "men"
-   * is never a term, so it can never match "mental".
+   * The shared subject tokenizer, so this scorer and the record gate cannot
+   * disagree about what the subject's words are. Long words match as safe
+   * prefixes; three letter words ("dog", "mat", "car") are exact match terms,
+   * because dropping them once turned "dog food" into a search for "food".
    */
-  const terms = [...new Set(
-    categoryTerms
-      .join(' ')
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((w) => w.length > 3),
-  )];
+  const terms = subjectTerms(categoryTerms);
 
   if (!terms.length) return { ...sub, hits: 0, wholeWordHits: 0, handleHits: 0, relevance: 0, matched: [] };
 
@@ -86,9 +81,8 @@ export function relevanceScore(sub: SubredditCandidate, categoryTerms: string[])
     const stem = term.replace(/s$/, '');
     return stem !== term && stem.length >= 4 ? [term, stem] : [term];
   };
-  const hasTerm = (term: string): boolean =>
-    forms(term).some((f) => new RegExp(`\\b${f}`, 'i').test(haystack));
-  const matched = terms.filter(hasTerm);
+  /* The shared per-term matcher: prefix for long words, exact for short. */
+  const matched = terms.filter((term) => termMatchesProse(term, haystack));
 
   /*
    * Which terms matched as a WHOLE WORD, not merely as a prefix of a longer,
@@ -139,13 +133,6 @@ export interface FilterResult {
   dropped: ScoredSubreddit[];
 }
 
-/* The distinct terms a subject reduces to, shared by the scorer and the gate
- * so they can never disagree about how many there are. */
-function terms(categoryTerms: string[]): string[] {
-  return [...new Set(
-    categoryTerms.join(' ').toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3),
-  )];
-}
 
 export function filterRelevant(
   subs: SubredditCandidate[],
