@@ -15,6 +15,14 @@
  * against the archive on 2026-08-13: a four word phrase returned zero hits
  * where a single word from it returned plenty. Narrow AND queries go empty
  * fast, and recall is what a corroboration count needs.
+ *
+ * AND FIRST, THEN OR, since 2026-08-24. The recall argument above is real and
+ * so is its cost: a search for "battery life" OR-matched every record that
+ * merely said "life", and the corroboration line counted them. So both
+ * drivers now try the AND form first and fall back to OR only when AND finds
+ * nothing. When records exist that carry every word, they are the answer;
+ * when none do, the measured recall behaviour is exactly what it always was.
+ * The fallback lives in the drivers, and conformance asserts they agree.
  */
 
 /*
@@ -68,4 +76,21 @@ export function toTsQuery(raw: string): string | null {
   const terms = extractTerms(raw);
   if (!terms.length) return null;
   return terms.join(' | ');
+}
+
+/*
+ * The AND forms, tried before the OR forms above. Null for a single term
+ * query, where strict and loose are the same search and running it twice
+ * would be a wasted round trip.
+ */
+export function toFts5QueryStrict(raw: string): string | null {
+  const terms = extractTerms(raw);
+  if (terms.length < 2) return null;
+  return terms.map((t) => `"${t}"`).join(' AND ');
+}
+
+export function toTsQueryStrict(raw: string): string | null {
+  const terms = extractTerms(raw);
+  if (terms.length < 2) return null;
+  return terms.join(' & ');
 }

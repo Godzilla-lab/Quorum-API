@@ -705,17 +705,34 @@ export function createReceiptsServer(options: ServerOptions): Server {
           res.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
         };
 
-        for (const event of queue.eventsSince(id, resumeFrom) ?? []) write(event);
+        /*
+         * A HEARTBEAT, BECAUSE THE QUIET STRETCH IS THE NORMAL CASE. A cold
+         * run spends most of a minute retrieving with nothing to say, and an
+         * idle proxy or load balancer with a 60 second timeout kills the
+         * socket mid run; the client then reconnects and, without the replay
+         * above, would have restarted the report. A comment frame is the SSE
+         * mechanism for exactly this: every parser discards it, and 25
+         * seconds sits under every common idle timeout. Unref'd so a
+         * heartbeat cannot hold the process open on shutdown.
+         */
+        const heartbeat = setInterval(() => { res.write(': keep-alive\n\n'); }, 25_000);
+        heartbeat.unref();
 
-        let cursor = queue.eventsSince(id, 0)?.at(-1)?.id ?? resumeFrom;
-        while (!controller.signal.aborted) {
-          const event = await queue.nextEvent(id, cursor, controller.signal);
-          if (!event) break;
-          cursor = event.id;
-          write(event);
-          /* `done` and `error` are terminal by definition, and a stream that
-           * stayed open after them is a connection nobody will ever close. */
-          if (event.type === 'done' || event.type === 'error') break;
+        try {
+          for (const event of queue.eventsSince(id, resumeFrom) ?? []) write(event);
+
+          let cursor = queue.eventsSince(id, 0)?.at(-1)?.id ?? resumeFrom;
+          while (!controller.signal.aborted) {
+            const event = await queue.nextEvent(id, cursor, controller.signal);
+            if (!event) break;
+            cursor = event.id;
+            write(event);
+            /* `done` and `error` are terminal by definition, and a stream that
+             * stayed open after them is a connection nobody will ever close. */
+            if (event.type === 'done' || event.type === 'error') break;
+          }
+        } finally {
+          clearInterval(heartbeat);
         }
         res.end();
       },

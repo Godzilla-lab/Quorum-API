@@ -26,7 +26,7 @@
 
 import type { CorpusDriver } from '../driver.ts';
 import { receiptId } from '../receipt-id.ts';
-import { toTsQuery } from '../terms.ts';
+import { toTsQuery, toTsQueryStrict } from '../terms.ts';
 import { storableText } from '../text.ts';
 import { FUTURE_TOLERANCE_SECONDS, MIN_CREATED_UTC, ageInDays, isWarm } from '../constants.ts';
 import type {
@@ -207,11 +207,11 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
 
     async search(query: string, options: SearchOptions = {}): Promise<DocHit[]> {
       const { category = null, limit = 200, minScore = null, source = null, from, until } = options;
-      const tsquery = toTsQuery(query);
-      if (!tsquery) return [];
+      const loose = toTsQuery(query);
+      if (!loose) return [];
 
       const where = ['d.text_tsv @@ to_tsquery(\'english\', $1)'];
-      const params: unknown[] = [tsquery];
+      const params: unknown[] = [loose];
       if (category) { params.push(category); where.push(`d.category = $${params.length}`); }
       if (source) { params.push(source); where.push(`d.source = $${params.length}`); }
       if (minScore != null) { params.push(minScore); where.push(`d.score >= $${params.length}`); }
@@ -227,16 +227,22 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
        * where higher is better. What conformance guarantees is the ordering and
        * the result set, not the numeric value of `rank`.
        */
-      const rows = await sql.query<DocRow>(
+      const text =
         `SELECT d.receipt_id, d.source, d.kind, d.external_id, d.category, d.channel,
                 d.text, d.score, d.url, d.created_utc, d.harvested_at,
                 ts_rank(d.text_tsv, to_tsquery('english', $1)) AS rank
          FROM docs d
          WHERE ${where.join(' AND ')}
          ORDER BY rank DESC, d.score DESC
-         LIMIT $${params.length}`,
-        params,
-      );
+         LIMIT $${params.length}`;
+      const run = (tsquery: string): Promise<DocRow[]> =>
+        sql.query<DocRow>(text, [tsquery, ...params.slice(1)]);
+
+      /* AND first, OR as the fallback, same ladder as the sqlite driver and
+       * for the reason given in terms.ts. */
+      const strict = toTsQueryStrict(query);
+      const strictRows = strict ? await run(strict) : [];
+      const rows = strictRows.length ? strictRows : await run(loose);
       return rows.map((r) => ({ ...toDoc(r), rank: num(r.rank) }));
     },
 

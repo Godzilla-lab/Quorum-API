@@ -13,7 +13,7 @@ rather than a README asserting it.
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/quorum-api.svg)](https://www.npmjs.com/package/quorum-api)
-[![Tests](https://img.shields.io/badge/tests-1%2C145-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1%2C147-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
 
@@ -38,20 +38,29 @@ rather than a README asserting it.
 posted, when, and its permalink. A customer of your customer can click a claim
 and read the human who said it.
 
-The hosted API lives at **https://quorum-api-j15n.onrender.com**, keyed, on a free
+The hosted API lives at **https://quorum-api-j15n.onrender.com**, on a free
 tier instance that sleeps when idle, so the first request after a quiet spell
 waits a few seconds for it to wake.
 
-**The hosted instance is open and free**: no key, no signup. Try it right now:
+**The hosted instance is keyed while the API is early.** The
+[API root](https://quorum-api-j15n.onrender.com) says how to request a key,
+and always says which mode the instance you are talking to is in. The health
+endpoint needs no key, so you can check it is alive right now:
 
 ```bash
-curl https://quorum-api-j15n.onrender.com/v1/categories/running%20shoes
+curl https://quorum-api-j15n.onrender.com/v1/healthz
 ```
 
-The rate limits are shared by every caller on the open instance, so be gentle.
-Self hosting supports per key auth, quotas, tenancy and webhook secrets, all
-self served from `GET /v1/usage`; the [API root](https://quorum-api-j15n.onrender.com)
-always says which mode the instance you are talking to is in.
+Self hosting supports open mode or per key auth, quotas, tenancy and webhook
+secrets, all self served from `GET /v1/usage`.
+
+> [!NOTE]
+> On Windows, the curl bundled with Git Bash uses the Schannel TLS stack,
+> which refuses any HTTPS connection when it cannot reach the certificate
+> revocation servers (`CRYPT_E_REVOCATION_OFFLINE`, common behind corporate
+> proxies and VPNs). That is the network, not this API. Add
+> `--ssl-revoke-best-effort` to the curl command, or call from WSL or
+> PowerShell instead.
 
 ## Contents
 
@@ -141,7 +150,7 @@ non zero and says which one.
 
 | | |
 |---|---|
-| **Engine** | Working. 1,145 tests, offline and keyless |
+| **Engine** | Working. 1,147 tests, offline and keyless |
 | **CLI** | Working, every flag |
 | **MCP server** | Working, five tools over stdio |
 | **JavaScript SDK** | Working, 11 methods |
@@ -214,7 +223,7 @@ Working on Quorum itself is the clone path:
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 1,145 tests, offline, no keys
+npm test          # 1,147 tests, offline, no keys
 ```
 
 Then research something. The input is a **subject**, not a URL. Plain text
@@ -715,7 +724,7 @@ npm run test:postgres  # the driver against a real server, needs QUORUM_PG_URL
 
 CI runs the test suite inside a network namespace with no route off the host, so
 an adapter that quietly reaches for the wire fails immediately instead of flaking
-later. Three of the 1,145 tests need a real PostgreSQL server and skip without
+later. Three of the 1,147 tests need a real PostgreSQL server and skip without
 `QUORUM_PG_URL`.
 
 ## License

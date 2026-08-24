@@ -17,7 +17,7 @@ import { dirname } from 'node:path';
 import type { CorpusDriver } from '../driver.ts';
 import { SQLITE_SCHEMA } from '../schema.ts';
 import { receiptId } from '../receipt-id.ts';
-import { toFts5Query } from '../terms.ts';
+import { toFts5Query, toFts5QueryStrict } from '../terms.ts';
 import { storableText } from '../text.ts';
 import { FUTURE_TOLERANCE_SECONDS, MIN_CREATED_UTC, WARM_MAX_AGE_DAYS, WARM_MIN_DOCS, ageInDays, isWarm } from '../constants.ts';
 import type {
@@ -257,11 +257,11 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
 
     async search(query: string, options: SearchOptions = {}): Promise<DocHit[]> {
       const { category = null, limit = 200, minScore = null, source = null, from, until } = options;
-      const match = ftsQuery(query);
-      if (!match) return [];
+      const loose = ftsQuery(query);
+      if (!loose) return [];
 
       const where = ['docs_fts MATCH ?'];
-      const args: (string | number)[] = [match];
+      const args: (string | number)[] = [];
       if (category) { where.push('d.category = ?'); args.push(category); }
       if (source) { where.push('d.source = ?'); args.push(source); }
       if (minScore != null) { where.push('d.score >= ?'); args.push(minScore); }
@@ -291,7 +291,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
        * The comment lives out here rather than inside the query, because a
        * backtick in a comment inside a template literal ends the template.
        */
-      const rows = db.prepare(`
+      const statement = db.prepare(`
         SELECT d.receipt_id, d.source, d.kind, d.external_id, d.category, d.channel,
                d.text, d.score, d.url, d.created_utc, d.harvested_at,
                bm25(docs_fts) AS rank
@@ -300,7 +300,20 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
         WHERE ${where.join(' AND ')}
         ORDER BY rank, d.score DESC
         LIMIT ?
-      `).all(...args) as unknown as DocRow[];
+      `);
+      const run = (match: string): DocRow[] =>
+        statement.all(match, ...args) as unknown as DocRow[];
+
+      /*
+       * AND FIRST, OR AS THE FALLBACK. "battery life" used to count every
+       * record that merely said "life". Records carrying every word are the
+       * answer when they exist; the measured recall behaviour (see terms.ts)
+       * is untouched when they do not. Strict is null for one word queries,
+       * where the two searches are identical.
+       */
+      const strict = toFts5QueryStrict(query);
+      const strictRows = strict ? run(strict) : [];
+      const rows = strictRows.length ? strictRows : run(loose);
 
       return rows.map((r) => ({ ...toDoc(r), rank: r.rank ?? 0 }));
     },

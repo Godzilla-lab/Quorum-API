@@ -190,6 +190,38 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * AND first, OR as the fallback. "battery life" used to OR its words and
+   * count every record that merely said "life"; when records carrying every
+   * word exist, they are the answer, and when none do the measured recall
+   * behaviour is unchanged. See terms.ts.
+   */
+  test(`${driverName}: a multi word query prefers records carrying every word`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'both', text: 'the battery life on these is dreadful, four hours at best' }),
+        doc({ externalId: 'battery-only', text: 'the battery swelled after a month' }),
+        doc({ externalId: 'life-only', text: 'life is too short for uncomfortable shoes' }),
+      ], 'running shoes');
+
+      const hits = await c.search('battery life', { category: 'running shoes' });
+      assert.deepEqual(hits.map((h) => h.externalId), ['both'],
+        'records with every word exist, so only they answer');
+    });
+  });
+
+  test(`${driverName}: when no record carries every word, the query falls back to any word`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'battery-only', text: 'the battery swelled after a month' }),
+        doc({ externalId: 'life-only', text: 'life is too short for uncomfortable shoes' }),
+      ], 'running shoes');
+
+      const hits = await c.search('battery life', { category: 'running shoes' });
+      assert.equal(hits.length, 2, 'recall is what a corroboration count needs when precision is unavailable');
+    });
+  });
+
   test(`${driverName}: a query of only short words returns nothing rather than everything`, async () => {
     await withCorpus(async (c) => {
       await c.addDocs([doc({ externalId: '1' })], 'running shoes');
