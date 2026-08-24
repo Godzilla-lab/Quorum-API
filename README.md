@@ -109,27 +109,33 @@ past.
 
 ### What it looks like
 
-The shape of a run, illustrated. Ids and names below are stand-ins:
+Real output, excerpted from a cold `npx quorum "espresso machine"` run on
+2026-08-24: 401 records in 227 seconds for $0.00.
 
 ```
 EVIDENCE  a claim needs 3 independent receipts to be stated as a finding
+          the percentage is share of all 401 records held for this category
 
-  sizing        200 receipts /  40 channels   FINDING
-                "the sizing on these runs small, had to size up"
-                rc_a8697befab91e873  reddit r/place22  2023-04-16
+  quality     88 receipts /  64 channels  21.9%  A0 B3 C85 D0   [finding]
+      "I often hear the priority list being 1. Quality of beans 2. Quality
+       of the grinder 3. Quality of the espresso machine..."
+         hackernews Why a spritz of water before grinding coffee yields
+         better results   rc_4d6d444821b0044f
 
-VERSUS    alpha shoes against 1 rival
-          each retrieved as a corpus of its own, so no number here is co-occurrence
+ATTESTED  7 records from 6 named parties   [finding]
+  A named party stated this to a regulator, on the record, with consequences
+  for lying. Two of these are a finding on their own.
 
-  sizing      LOUDER FOR alpha shoes
-              alpha shoes         45.0%   45 of 100 records, 45 channels, finding
-              beta shoes           5.0%    5 of 100 records,  5 channels, finding
+      "CPSC And Krups Announce Action On Espresso Makers..."
+         cpsc Krups   rc_a4883bfb1b04d1c1
 
-RECEIPTS  47 cited, 47 resolved back to real records
+RECEIPTS  195 cited, 195 resolved back to real records
+
+COST      $0.0000 in 227.3s
 ```
 
-In a real run every id in that output is fetchable. If an id does not resolve,
-the run exits non zero and says which one.
+Every id in that output is fetchable from the corpus that run wrote. If an id
+does not resolve, the run exits non zero and says which one.
 
 ## Use cases
 
