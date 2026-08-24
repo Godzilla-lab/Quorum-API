@@ -247,6 +247,16 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
            */
           if (totalWritten + batch.length >= maxRecordsTotal) { stoppedEarly = 'record-cap'; break; }
         }
+        /*
+         * FLUSHED PER QUERY, NOT ONLY PER 100 RECORDS, so the progress line
+         * below never lies. A source yielding 99 records filled no batch, so
+         * every progress line said "0 stored" while the flush after the loop
+         * quietly wrote 89, and the live counter disagreed with the summary
+         * table it was supposedly narrating. Seen live 2026-08-23 on
+         * hackernews. Inside the try because a failed write is a degraded
+         * query, not a dead run.
+         */
+        await flush();
       } catch (err) {
         /*
          * A single query failing is not the source failing. Record it, keep the

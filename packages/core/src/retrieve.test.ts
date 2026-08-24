@@ -64,6 +64,31 @@ test('records from every source land in the corpus', async () => {
 });
 
 /*
+ * The live counter and the summary table must agree. Seen live 2026-08-23: a
+ * source yielding 99 records never filled the 100 record batch, so every
+ * progress line said "0 stored" while the flush after the query loop wrote 89.
+ * The last progress line for a source now carries what the corpus holds.
+ */
+test('a progress line never reports fewer stored than the corpus was given', async () => {
+  const corpus = freshCorpus();
+  const updates: { source: string; seen: number; written: number }[] = [];
+  await retrieveAll({
+    sources: [makeSource('small', {
+      queries: [{ text: 'sizing' }],
+      records: () => [record(1), record(2), record(3)],
+    })],
+    corpus, plan: PLAN, ctx: makeCtx(),
+    onProgress: (u) => updates.push(u),
+  });
+
+  const last = updates.at(-1)!;
+  assert.equal(last.seen, 3);
+  assert.equal(last.written, 3, 'three records well under one batch, reported after the flush');
+  assert.equal((await corpus.totals()).docs, 3);
+  await corpus.close();
+});
+
+/*
  * THE LOAD BEARING RULE. A report missing one leg is still a good report.
  * Silently returning one that LOOKS complete is the failure worth engineering
  * against.
