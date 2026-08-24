@@ -102,6 +102,32 @@ test('an issue that never names the subject is gated out even inside a matching 
   assert.deepEqual(out, []);
 });
 
+/*
+ * Found live 2026-08-24: a full "Best Running Shoes in America: 2026"
+ * affiliate roundup filed as an issue in jacjocker4-netizen/jacjocker4.github.io.
+ * A github.io repo is a hosted website, and its tracker is where content farms
+ * park spam pages for search indexing, so the host class is excluded outright
+ * rather than left to outrun the density gate.
+ */
+test('A GITHUB.IO REPO IS A WEBSITE, AND ITS ISSUES NEVER BECOME RECORDS', async () => {
+  const item = (repo: string, number: number) => ({
+    number, title: 'Playwright feels flaky in CI',
+    body: 'Our playwright suite reports flaky timeouts on the playwright runners every night.',
+    html_url: `https://github.com/${repo}/issues/${number}`,
+    repository_url: `https://api.github.com/repos/${repo}`,
+    created_at: '2026-01-01T00:00:00Z', reactions: { total_count: 3 },
+  });
+  const body = JSON.stringify({
+    items: [item('jacjocker4-netizen/jacjocker4.github.io', 6), item('o/playwright-helpers', 7)],
+  });
+  const s = createGithubIssuesSource({ throttle: instantThrottle(), fetch: respond(body) });
+  await s.plan(PLAN);
+  const out = [];
+  for await (const r of s.retrieve({ text: '"playwright" flaky' }, makeCtx())) out.push(r);
+  assert.deepEqual(out.map((r) => r.externalId), ['o/playwright-helpers#7'],
+    'the identical text survives from a software repo and dies from a hosted site');
+});
+
 test('code fences, template comments and images do not reach the corpus', () => {
   const cleaned = cleanIssueBody(
     'The sync fails.\n```js\nconst x = 1;\nawait sync();\n```\n<!-- template: fill this in -->'

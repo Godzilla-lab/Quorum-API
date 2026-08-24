@@ -221,6 +221,33 @@ test('phrase mode gets the same channel treatment', () => {
   );
 });
 
+/*
+ * Regression, measured live 2026-08-24. The handle branch of phrase mode
+ * required the subject phrase to be PRESENT and never asked it to be the
+ * FOCUS, so the ten longest github records stored for "running shoes" were
+ * 16,314 to 63,983 characters with one to three mentions each: an entire
+ * scraped race site pasted into an issue, 66 Slickdeals listings where one
+ * listing named the subject. An outside tester resolved them behind a
+ * finding. A handle vouches for nothing, so its records get the same focus
+ * rule an off topic thread gets.
+ */
+test('A DUMP THAT MENTIONS THE SUBJECT ONCE IS NOT ABOUT THE SUBJECT', () => {
+  const terms = subjectTerms(['running shoes', 'running shoes']);
+  const opts = { mode: 'phrase' as const, phrases: ['running shoes'], channelKind: 'handle' as const };
+
+  /* A long document with a single incidental mention, the measured shape. */
+  const dump = `${'leaf blowers, laptops, stuffing mix, magnetic screen doors. '.repeat(40)}`
+    + 'METAONLY running shoes from $7.90. '
+    + `${'hotel lists, volunteer rules, water station mile markers. '.repeat(40)}`;
+  assert.equal(isRelevantRecord(dump, 'dealsniper', terms, opts), false,
+    'one mention in thousands of characters is an aside, not evidence');
+
+  /* A short issue that names the subject once is exactly what tier B is for. */
+  const issue = 'The running shoes size guide on the product page contradicts the checkout page.';
+  assert.equal(isRelevantRecord(issue, 'vendor/storefront', terms, opts), true,
+    'a focused issue naming the subject once must survive');
+});
+
 test('a handle is scored as a substring, because it has no word boundaries', () => {
   const terms = subjectTerms(['running shoes', 'running shoes']);
   assert.equal(scoreHandle('runningshoegeeks', terms).hits, 2, 'shoes must find shoegeeks');

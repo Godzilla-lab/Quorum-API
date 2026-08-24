@@ -382,9 +382,24 @@ export function isRelevantRecord(
    * words. See matchesSubjectPhrase for the measurement behind this.
    */
   if (mode === 'phrase' && phrases.length) {
-    /* A handle is a squashed identifier and cannot carry prose, so the record
-     * has to supply the phrase itself. */
-    if (channelKind !== 'title') return matchesSubjectPhrase(text, phrases);
+    /*
+     * A handle is a squashed identifier and cannot carry prose, so the record
+     * has to supply the phrase itself, AND has to be focused on it. Presence
+     * alone let scraper dumps through: measured live 2026-08-24, the ten
+     * longest github records stored for "running shoes" were 16,314 to 63,983
+     * characters with one to three subject mentions each. One was an entire
+     * scraped race site pasted into an issue, one was 66 Slickdeals listings
+     * where a single listing named the subject, and an outside tester resolved
+     * them behind a finding, which is the exact failure this gate exists to
+     * prevent. The title branch below already applies the focus rule to off
+     * topic threads; a handle container, which vouches for nothing, deserves
+     * at least the same scrutiny. A 300 character issue naming the subject
+     * once still passes; a 64K dump now needs ~160 mentions and dies.
+     */
+    if (channelKind !== 'title') {
+      const needed = Math.max(1, Math.ceil(text.length / CHARS_PER_SUBJECT_MENTION));
+      return countSubjectPhrase(text, phrases) >= needed;
+    }
 
     /*
      * ON A GENERAL FORUM, THE THREAD TOPIC IS WHAT MAKES A COMMENT TOPICAL.

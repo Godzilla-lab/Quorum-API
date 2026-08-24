@@ -187,6 +187,19 @@ export function createGithubIssuesSource(options: GithubIssuesOptions = {}): Sou
         if (!item.number || !item.repository_url) continue;
 
         const repo = repoFromUrl(item.repository_url);
+        /*
+         * A github.io repo is a hosted website, not a software project, and
+         * its issues are where content farms park spam pages for search
+         * indexing. Found live 2026-08-24: an entire "Best Running Shoes in
+         * America: 2026" affiliate roundup filed as an issue in
+         * jacjocker4-netizen/jacjocker4.github.io, 9,337 characters of
+         * marketing copy shaped exactly like the buyer voice this product
+         * sells. The density gate happens to kill that one, but a farm page
+         * written densely enough would beat a ratio, so the host class is
+         * excluded outright. Nothing a real user files against real software
+         * lives in a github.io repo's tracker.
+         */
+        if (/\.github\.io$/i.test(repo)) continue;
         const text = [item.title ?? '', cleanIssueBody(item.body ?? '')]
           .join('. ').replace(/\s+/g, ' ').trim();
         if (text.length < 40) continue;
