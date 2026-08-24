@@ -41,6 +41,12 @@ export interface ToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   /*
+   * The spec's behaviour hints (readOnlyHint, destructiveHint, idempotentHint,
+   * openWorldHint), stated honestly or not at all. Clients use them to decide
+   * what needs confirmation, so a wrong hint is worse than a missing one.
+   */
+  annotations?: Record<string, unknown>;
+  /*
    * Returns markdown. Not JSON: measured at roughly 60% of the tokens for the
    * same content, and token cost is the dominant cost in an agent loop.
    *
@@ -131,6 +137,7 @@ export async function handleMessage(
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
+          ...(t.annotations ? { annotations: t.annotations } : {}),
         })),
       });
 

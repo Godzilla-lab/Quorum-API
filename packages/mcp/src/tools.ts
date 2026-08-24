@@ -68,6 +68,7 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
 
   const searchEvidence: ToolDefinition = {
     name: 'search_evidence',
+    annotations: { title: 'Search the evidence corpus', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       'Search the retained corpus for what people actually said about a product or topic. '
       + 'Returns how many independent records exist, across how many channels, whether that '
@@ -129,6 +130,7 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
 
   const getReceipt: ToolDefinition = {
     name: 'get_receipt',
+    annotations: { title: 'Resolve receipt ids', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       'Resolve receipt ids to the real records behind them. This is how you CHECK a claim: '
       + 'if an id does not resolve, the claim citing it was not real. Takes one id or many.',
@@ -184,6 +186,7 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
 
   const categoryWarmth: ToolDefinition = {
     name: 'category_warmth',
+    annotations: { title: 'Check category warmth', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       'How much is already held for a category, and therefore whether asking about it is '
       + 'instant and free or slow and expensive. Check this BEFORE starting a report.',
@@ -214,6 +217,7 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
 
   const compareFormats: ToolDefinition = {
     name: 'compare_formats',
+    annotations: { title: 'Compare ad formats', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     description:
       'Video versus static advertising for a category, computed from how long real ads actually '
       + 'ran rather than from opinion. Returns a verdict, its confidence, and the ads behind it.',
@@ -261,6 +265,7 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
     const research = deps.research;
     tools.unshift({
       name: 'research_product',
+      annotations: { title: 'Run a full report', readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
       description:
         'Run a full report on a product or topic: retrieve from public sources, corroborate, and '
         + 'return findings with receipts. SLOW AND EXPENSIVE on a cold category, minutes rather '
