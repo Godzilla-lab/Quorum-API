@@ -206,6 +206,39 @@ export interface SpendByKey {
 }
 
 /*
+ * A standing watch: re-run a subject on a schedule and send the report,
+ * diff included, to a webhook. Tenant owned, and fired under the owning
+ * key label so every fire pays the owner's quota.
+ */
+export interface MonitorInput {
+  /* mon_ + 16 hex, minted by the server so the driver never invents ids. */
+  monitorId: string;
+  tenantId?: string | null;
+  keyLabel: string;
+  subject: string;
+  terms: string[];
+  webhookUrl: string;
+  intervalSeconds: number;
+}
+
+export interface Monitor {
+  monitorId: string;
+  tenantId: string | null;
+  keyLabel: string;
+  subject: string;
+  terms: string[];
+  webhookUrl: string;
+  intervalSeconds: number;
+  enabled: boolean;
+  createdAt: number;
+  /* Zero until the first fire, so a fresh monitor is immediately due. */
+  lastFiredAt: number;
+  /* The last submit's outcome: a report id, or the refusal reason.
+   * Diagnostic, never load bearing. */
+  lastResult: string | null;
+}
+
+/*
  * A queued webhook delivery.
  *
  * ONE REPORT HAS ONE DELIVERY, so the report id is the key rather than a

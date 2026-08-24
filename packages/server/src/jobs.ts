@@ -99,6 +99,9 @@ export interface RunOutcome {
   silence?: unknown;
   formats?: unknown;
   durationBasis?: unknown;
+  /* What changed since this tenant's previous report on the same category.
+   * Null on a first run, and the field a monitor's webhook receiver reads. */
+  diff?: unknown;
 }
 
 export interface ReportClaims {
@@ -300,6 +303,7 @@ export interface ReportSnapshot {
   trends: unknown[];
   voice: unknown[];
   themes: unknown[];
+  diff: unknown;
   retrieval: unknown;
   warmth: unknown;
   degraded: unknown[];
@@ -568,6 +572,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       silence: outcome?.silence ?? null,
       formats: outcome?.formats ?? null,
       durationBasis: outcome?.durationBasis ?? null,
+      diff: outcome?.diff ?? null,
       cost: outcome?.cost ?? null,
       error: report.error ? { type: 'internal', message: report.error } : null,
       version: report.version,

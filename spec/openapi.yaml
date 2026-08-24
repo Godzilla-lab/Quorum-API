@@ -89,6 +89,8 @@ tags:
     description: Corpus warmth, so a caller can tell cheap from expensive first.
   - name: usage
     description: Spend and quota for the calling key.
+  - name: monitors
+    description: Standing watches that re-run a subject on a schedule and webhook the diff.
 
 paths:
   /reports:
@@ -468,6 +470,103 @@ paths:
               schema: { $ref: '#/components/schemas/CategoryStats' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+
+  /monitors:
+    post:
+      operationId: createMonitor
+      tags: [monitors]
+      summary: Create a standing watch on a subject
+      description: |
+        A monitor re-runs its subject on a schedule through the same queue,
+        quota and coalescing a hand submitted report goes through, under the
+        calling key, and delivers the finished report, `diff` included, to the
+        webhook. The webhook is required: a monitor nobody hears from is a
+        scheduled bill with no customer.
+
+        The interval floor is six hours, because every fire is a real
+        retrieval against volunteer archives. At most five monitors per key.
+
+        On an instance that sleeps when idle, monitors fire when something
+        wakes the instance rather than on the clock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject, webhookUrl]
+              properties:
+                subject:
+                  type: string
+                  description: A product name, a topic, or a product URL.
+                terms:
+                  type: array
+                  items: { type: string }
+                  maxItems: 12
+                  description: What to ask about each time. Defaults to the standard questions.
+                intervalHours:
+                  type: number
+                  minimum: 6
+                  maximum: 720
+                  default: 24
+                webhookUrl:
+                  type: string
+                  description: https only. Receives the finished report payload, signed.
+      responses:
+        '201':
+          description: The standing watch, immediately due for its first fire.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Monitor' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    get:
+      operationId: listMonitors
+      tags: [monitors]
+      summary: The calling key's monitors
+      description: Tenant scoped. A key sees its own monitors and nobody else's.
+      responses:
+        '200':
+          description: This key's monitors.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [monitors]
+                properties:
+                  monitors:
+                    type: array
+                    items: { $ref: '#/components/schemas/Monitor' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /monitors/{monitorId}:
+    delete:
+      operationId: deleteMonitor
+      tags: [monitors]
+      summary: Delete a monitor
+      description: |
+        Scoped to the calling key. Another key's monitor id returns 404 rather
+        than 403, so an id cannot be probed for existence.
+      parameters:
+        - name: monitorId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^mon_[0-9a-f]{16}$' }
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted]
+                properties:
+                  deleted: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
 
   /usage:
     get:
@@ -1496,6 +1595,16 @@ components:
             - type: 'null'
             - $ref: '#/components/schemas/FormatVerdict'
         durationBasis: { $ref: '#/components/schemas/DurationBasis' }
+        diff:
+          description: |
+            What changed since this tenant's previous report on the same
+            category. Null on a first run. Scoped to the calling key, so a
+            customer's first report never announces changes since a run that
+            was never theirs. This is the field a monitor's webhook receiver
+            reads to decide whether anything moved.
+          oneOf:
+            - type: 'null'
+            - type: object
         degraded:
           type: array
           items: { $ref: '#/components/schemas/Degradation' }
@@ -1697,6 +1806,32 @@ components:
                     type: number
                     description: Relevance rank, for ordering only. Not a confidence.
         nextCursor: { type: [string, 'null'] }
+
+    Monitor:
+      type: object
+      required: [id, subject, terms, intervalHours, webhookUrl, enabled]
+      properties:
+        id: { type: string, pattern: '^mon_[0-9a-f]{16}$' }
+        subject: { type: string }
+        terms:
+          type: array
+          items: { type: string }
+        intervalHours: { type: number }
+        webhookUrl: { type: string }
+        enabled: { type: boolean }
+        createdAt: { type: integer, description: Unix seconds. }
+        lastFiredAt:
+          description: Null before the first fire, never a fake epoch date.
+          oneOf:
+            - type: 'null'
+            - type: integer
+        lastResult:
+          description: |
+            The last fire's outcome, diagnostic and never load bearing. A
+            report id when the queue accepted, or the reason it refused.
+          oneOf:
+            - type: 'null'
+            - type: string
 
     Usage:
       type: object

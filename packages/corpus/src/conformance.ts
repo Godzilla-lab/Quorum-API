@@ -563,6 +563,65 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * Monitors. The tenancy rules mirror priorReports exactly: exact match,
+   * undefined means the NULL tenant, forgetting fails closed. The due scan is
+   * the one operator-scope read, because the scheduler serves every tenant.
+   */
+  test(`${driverName}: a monitor is tenant owned in every direction`, async () => {
+    await withCorpus(async (c) => {
+      await c.createMonitor({
+        monitorId: 'mon_aaaaaaaaaaaaaaaa', tenantId: 'key-1', keyLabel: 'key-1',
+        subject: 'running shoes', terms: ['sizing', 'price'],
+        webhookUrl: 'https://example.test/hook', intervalSeconds: 86_400,
+      });
+
+      const mine = await c.listMonitors('key-1');
+      assert.equal(mine.length, 1);
+      assert.equal(mine[0]?.subject, 'running shoes');
+      assert.deepEqual(mine[0]?.terms, ['sizing', 'price'], 'terms round trip through storage');
+      assert.equal(mine[0]?.lastFiredAt, 0, 'a fresh monitor is immediately due');
+
+      assert.deepEqual(await c.listMonitors('key-2'), [], 'another tenant sees nothing');
+      assert.deepEqual(await c.listMonitors(), [], 'the NULL tenant is its own tenant, not a wildcard');
+
+      assert.equal(await c.deleteMonitor('mon_aaaaaaaaaaaaaaaa', 'key-2'), 0,
+        'another tenant cannot delete it either');
+      assert.equal(await c.deleteMonitor('mon_aaaaaaaaaaaaaaaa', 'key-1'), 1);
+      assert.deepEqual(await c.listMonitors('key-1'), []);
+    });
+  });
+
+  test(`${driverName}: due monitors follow the clock, across every tenant`, async () => {
+    await withClock(async (c, clock) => {
+      await c.createMonitor({
+        monitorId: 'mon_bbbbbbbbbbbbbbbb', tenantId: 'key-1', keyLabel: 'key-1',
+        subject: 'standing desks', terms: [], webhookUrl: 'https://example.test/a',
+        intervalSeconds: 3_600,
+      });
+      await c.createMonitor({
+        monitorId: 'mon_cccccccccccccccc', tenantId: 'key-2', keyLabel: 'key-2',
+        subject: 'air purifiers', terms: [], webhookUrl: 'https://example.test/b',
+        intervalSeconds: 3_600,
+      });
+
+      const due = await c.dueMonitors(clock.now());
+      assert.deepEqual(due.map((m) => m.monitorId).sort(),
+        ['mon_bbbbbbbbbbbbbbbb', 'mon_cccccccccccccccc'],
+        'the scheduler sees every tenant, which is its job');
+
+      await c.markMonitorFired('mon_bbbbbbbbbbbbbbbb', clock.now(), 'rep_1234567812345678');
+      assert.deepEqual((await c.dueMonitors(clock.now())).map((m) => m.monitorId),
+        ['mon_cccccccccccccccc'], 'a fired monitor is not due again yet');
+
+      clock.advanceSeconds(3_601);
+      const later = await c.dueMonitors(clock.now());
+      assert.equal(later.length, 2, 'the interval elapsed and it is due again');
+      const fired = later.find((m) => m.monitorId === 'mon_bbbbbbbbbbbbbbbb');
+      assert.equal(fired?.lastResult, 'rep_1234567812345678', 'the last outcome travels with it');
+    });
+  });
+
   test(`${driverName}: a snapshot write is idempotent and the first write wins`, async () => {
     await withCorpus(async (c) => {
       await c.saveReportSnapshot({

@@ -44,6 +44,8 @@ import type {
   Doc,
   DocHit,
   DocInput,
+  Monitor,
+  MonitorInput,
   DurationConfidence,
   PriorReport,
   ProductFacts,
@@ -162,6 +164,28 @@ const toDelivery = (r: PgDeliveryRow): WebhookDelivery => ({
   lastError: r.last_error,
   createdAt: num(r.created_at),
   deliveredAt: r.delivered_at === null ? null : num(r.delivered_at),
+});
+
+
+interface PgMonitorRow {
+  monitor_id: string; tenant_id: string | null; key_label: string;
+  subject: string; terms: unknown; webhook_url: string;
+  interval_seconds: unknown; enabled: boolean; created_at: unknown;
+  last_fired_at: unknown; last_result: string | null;
+}
+
+const toMonitor = (r: PgMonitorRow): Monitor => ({
+  monitorId: r.monitor_id,
+  tenantId: r.tenant_id,
+  keyLabel: r.key_label,
+  subject: r.subject,
+  terms: list(r.terms),
+  webhookUrl: r.webhook_url,
+  intervalSeconds: num(r.interval_seconds),
+  enabled: r.enabled === true,
+  createdAt: num(r.created_at),
+  lastFiredAt: num(r.last_fired_at),
+  lastResult: r.last_result,
 });
 
 export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver {
@@ -535,6 +559,63 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
         [before],
       );
       return rows.length;
+    },
+
+
+    async createMonitor(monitor: MonitorInput): Promise<void> {
+      await sql.query(
+        `INSERT INTO monitors
+           (monitor_id, tenant_id, key_label, subject, terms, webhook_url, interval_seconds, enabled, created_at, last_fired_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8, 0)`,
+        [
+          monitor.monitorId, monitor.tenantId ?? null, monitor.keyLabel,
+          monitor.subject, JSON.stringify(monitor.terms), monitor.webhookUrl,
+          monitor.intervalSeconds, nowSeconds(),
+        ],
+      );
+    },
+
+    async listMonitors(tenantId?: string | null): Promise<Monitor[]> {
+      /* Exact tenant match, undefined meaning the NULL tenant. Same fails
+       * closed rule as priorReports, enforced in SQL rather than left to the
+       * inert-for-owners RLS policies. */
+      const rows = await sql.query<PgMonitorRow>(
+        `SELECT monitor_id, tenant_id, key_label, subject, terms, webhook_url,
+                interval_seconds, enabled, created_at, last_fired_at, last_result
+         FROM monitors WHERE tenant_id IS NOT DISTINCT FROM $1
+         ORDER BY created_at`,
+        [tenantId ?? null],
+      );
+      return rows.map(toMonitor);
+    },
+
+    async deleteMonitor(monitorId: string, tenantId?: string | null): Promise<number> {
+      const rows = await sql.query<{ monitor_id: string }>(
+        `DELETE FROM monitors
+         WHERE monitor_id = $1 AND tenant_id IS NOT DISTINCT FROM $2
+         RETURNING monitor_id`,
+        [monitorId, tenantId ?? null],
+      );
+      return rows.length;
+    },
+
+    async dueMonitors(now: number): Promise<Monitor[]> {
+      const rows = await sql.query<PgMonitorRow>(
+        `SELECT monitor_id, tenant_id, key_label, subject, terms, webhook_url,
+                interval_seconds, enabled, created_at, last_fired_at, last_result
+         FROM monitors
+         WHERE enabled AND last_fired_at + interval_seconds <= $1
+         ORDER BY last_fired_at`,
+        [now],
+      );
+      return rows.map(toMonitor);
+    },
+
+    async markMonitorFired(monitorId: string, at: number, result: string): Promise<void> {
+      await sql.query(
+        'UPDATE monitors SET last_fired_at = $1, last_result = $2 WHERE monitor_id = $3',
+        [at, result, monitorId],
+      );
     },
 
     async recordSpend(keyLabel: string, amountUsd: number): Promise<void> {

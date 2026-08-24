@@ -28,7 +28,7 @@
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { meterFor, type Quotas } from './quotas.ts';
 import type { CorpusDriver, SourceId } from '@quorum/corpus';
 import { isReceiptId } from '@quorum/corpus';
@@ -418,6 +418,105 @@ export function createReceiptsServer(options: ServerOptions): Server {
         },
         headers: { allow: 'POST' },
       }),
+    },
+
+    /*
+     * MONITORS: standing watches. A monitor re-runs its subject on a schedule
+     * through the same queue, quota and coalescing a hand submitted report
+     * goes through, under the owning key, and the finished payload, diff
+     * included, goes to the monitor's webhook. The webhook url is REQUIRED,
+     * because a monitor nobody hears from is a scheduled bill with no
+     * customer. Tenant owned end to end: list and delete see only the calling
+     * key's monitors, enforced in SQL by the driver.
+     */
+    {
+      method: 'POST',
+      pattern: /^\/v1\/monitors$/,
+      handler: async (ctx) => {
+        const body = ctx.body as {
+          subject?: unknown; terms?: unknown; intervalHours?: unknown; webhookUrl?: unknown;
+        } | undefined;
+
+        const subject = typeof body?.subject === 'string' ? body.subject.trim() : '';
+        if (!subject) return error(400, 'invalid_request', 'subject is required', ctx.requestId);
+
+        const rawTerms = body?.terms ?? [];
+        if (!Array.isArray(rawTerms) || rawTerms.some((t) => typeof t !== 'string')) {
+          return error(400, 'invalid_request', 'terms must be an array of strings', ctx.requestId);
+        }
+        const terms = (rawTerms as string[]).map((t) => t.trim()).filter(Boolean).slice(0, 12);
+
+        const webhookUrl = body?.webhookUrl;
+        if (typeof webhookUrl !== 'string') {
+          return error(400, 'invalid_request', 'webhookUrl is required: a monitor nobody hears from is a scheduled bill with no customer', ctx.requestId);
+        }
+        const verdict = checkWebhookUrl(webhookUrl);
+        if (!verdict.ok) return error(400, 'invalid_request', verdict.reason, ctx.requestId);
+
+        /*
+         * Six hours is the floor because every fire is a real retrieval
+         * against volunteer archives, and a warm rerun still re-asks the
+         * upstreams. Anyone needing minutes-fresh data is asking for a
+         * different product than public archive research.
+         */
+        const intervalHours = body?.intervalHours === undefined ? 24 : Number(body.intervalHours);
+        if (!Number.isFinite(intervalHours) || intervalHours < 6 || intervalHours > 24 * 30) {
+          return error(400, 'invalid_request', 'intervalHours must be between 6 and 720', ctx.requestId);
+        }
+
+        /* A cap, not a quota: monitors are standing spend, and five per key is
+         * generous for a human and stops a loop. */
+        const existing = await corpus.listMonitors(ctx.keyLabel);
+        if (existing.length >= 5) {
+          return error(400, 'invalid_request', 'at most 5 monitors per key. Delete one first: GET /v1/monitors lists yours.', ctx.requestId);
+        }
+
+        const id = `mon_${randomBytes(8).toString('hex')}`;
+        await corpus.createMonitor({
+          monitorId: id, tenantId: ctx.keyLabel, keyLabel: ctx.keyLabel,
+          subject, terms, webhookUrl, intervalSeconds: Math.round(intervalHours * 3600),
+        });
+        return {
+          status: 201,
+          body: { id, subject, terms, intervalHours, webhookUrl, enabled: true },
+        };
+      },
+    },
+
+    {
+      method: 'GET',
+      pattern: /^\/v1\/monitors$/,
+      handler: async (ctx) => {
+        const monitors = await corpus.listMonitors(ctx.keyLabel);
+        return {
+          status: 200,
+          body: {
+            monitors: monitors.map((m) => ({
+              id: m.monitorId,
+              subject: m.subject,
+              terms: m.terms,
+              intervalHours: m.intervalSeconds / 3600,
+              webhookUrl: m.webhookUrl,
+              enabled: m.enabled,
+              createdAt: m.createdAt,
+              /* Null before the first fire rather than a fake epoch date. */
+              lastFiredAt: m.lastFiredAt || null,
+              lastResult: m.lastResult,
+            })),
+          },
+        };
+      },
+    },
+
+    {
+      method: 'DELETE',
+      pattern: /^\/v1\/monitors\/(mon_[0-9a-f]{16})$/,
+      handler: async (ctx) => {
+        const id = /^\/v1\/monitors\/(mon_[0-9a-f]{16})$/.exec(ctx.url.pathname)![1]!;
+        const removed = await corpus.deleteMonitor(id, ctx.keyLabel);
+        if (!removed) return error(404, 'not_found', 'no monitor carries this id', ctx.requestId);
+        return { status: 200, body: { deleted: id } };
+      },
     },
 
     /*

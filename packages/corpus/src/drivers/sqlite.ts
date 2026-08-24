@@ -35,6 +35,8 @@ import type {
   Doc,
   DocHit,
   DocInput,
+  Monitor,
+  MonitorInput,
   DurationConfidence,
   PriorReport,
   ProductFacts,
@@ -168,6 +170,26 @@ const toDelivery = (r: DeliveryRow): WebhookDelivery => ({
   createdAt: r.created_at,
   deliveredAt: r.delivered_at,
 });
+
+
+interface MonitorRow {
+  monitor_id: string; tenant_id: string | null; key_label: string;
+  subject: string; terms: string; webhook_url: string;
+  interval_seconds: number; enabled: number; created_at: number;
+  last_fired_at: number; last_result: string | null;
+}
+
+function toMonitor(r: MonitorRow): Monitor {
+  let terms: string[] = [];
+  try { const p: unknown = JSON.parse(r.terms); if (Array.isArray(p)) terms = p.map(String); } catch { /* a corrupt row lists no terms rather than crashing the scheduler */ }
+  return {
+    monitorId: r.monitor_id, tenantId: r.tenant_id, keyLabel: r.key_label,
+    subject: r.subject, terms, webhookUrl: r.webhook_url,
+    intervalSeconds: Number(r.interval_seconds), enabled: r.enabled === 1,
+    createdAt: Number(r.created_at), lastFiredAt: Number(r.last_fired_at),
+    lastResult: r.last_result,
+  };
+}
 
 export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
   const { path, now: nowSeconds = systemClock } = options;
@@ -613,6 +635,52 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
     async pruneReportSnapshots(before: number): Promise<number> {
       const result = db.prepare('DELETE FROM report_snapshots WHERE created_at < ?').run(before);
       return Number(result.changes);
+    },
+
+    async createMonitor(monitor: MonitorInput): Promise<void> {
+      db.prepare(`
+        INSERT INTO monitors
+          (monitor_id, tenant_id, key_label, subject, terms, webhook_url, interval_seconds, enabled, created_at, last_fired_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, 0)
+      `).run(
+        monitor.monitorId, monitor.tenantId ?? null, monitor.keyLabel,
+        monitor.subject, JSON.stringify(monitor.terms), monitor.webhookUrl,
+        monitor.intervalSeconds, nowSeconds(),
+      );
+    },
+
+    async listMonitors(tenantId?: string | null): Promise<Monitor[]> {
+      /* Exact tenant match, undefined meaning the NULL tenant. Same fails
+       * closed rule as priorReports, for the same reason. */
+      const rows = db.prepare(`
+        SELECT monitor_id, tenant_id, key_label, subject, terms, webhook_url,
+               interval_seconds, enabled, created_at, last_fired_at, last_result
+        FROM monitors WHERE tenant_id IS ?
+        ORDER BY created_at
+      `).all(tenantId ?? null) as unknown as MonitorRow[];
+      return rows.map(toMonitor);
+    },
+
+    async deleteMonitor(monitorId: string, tenantId?: string | null): Promise<number> {
+      const result = db.prepare('DELETE FROM monitors WHERE monitor_id = ? AND tenant_id IS ?')
+        .run(monitorId, tenantId ?? null);
+      return Number(result.changes);
+    },
+
+    async dueMonitors(now: number): Promise<Monitor[]> {
+      const rows = db.prepare(`
+        SELECT monitor_id, tenant_id, key_label, subject, terms, webhook_url,
+               interval_seconds, enabled, created_at, last_fired_at, last_result
+        FROM monitors
+        WHERE enabled = 1 AND last_fired_at + interval_seconds <= ?
+        ORDER BY last_fired_at
+      `).all(now) as unknown as MonitorRow[];
+      return rows.map(toMonitor);
+    },
+
+    async markMonitorFired(monitorId: string, at: number, result: string): Promise<void> {
+      db.prepare('UPDATE monitors SET last_fired_at = ?, last_result = ? WHERE monitor_id = ?')
+        .run(at, result, monitorId);
     },
 
     async recordSpend(keyLabel: string, amountUsd: number): Promise<void> {

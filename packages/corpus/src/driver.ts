@@ -28,6 +28,8 @@ import type {
   Doc,
   DocHit,
   DocInput,
+  Monitor,
+  MonitorInput,
   PriorReport,
   ProductFacts,
   ReportInput,
@@ -121,6 +123,22 @@ export interface CorpusDriver {
   /* Snapshots are all settled by definition, so age is the only criterion.
    * Returns the number removed. */
   pruneReportSnapshots(before: number): Promise<number>;
+
+  /*
+   * Monitors: standing watches that re-run a subject on a schedule.
+   *
+   * List and delete are TENANT SCOPED with the same exact-match rule as
+   * priorReports: undefined means the NULL tenant, never every tenant, so
+   * forgetting fails closed. `dueMonitors` is the one operator-scope read,
+   * because the scheduler serves every tenant's standing orders; it returns
+   * enabled monitors whose interval has elapsed since their last fire.
+   */
+  createMonitor(monitor: MonitorInput): Promise<void>;
+  listMonitors(tenantId?: string | null): Promise<Monitor[]>;
+  /* Returns rows removed: 0 means no such monitor in this tenant's view. */
+  deleteMonitor(monitorId: string, tenantId?: string | null): Promise<number>;
+  dueMonitors(now: number): Promise<Monitor[]>;
+  markMonitorFired(monitorId: string, at: number, result: string): Promise<void>;
 
   /*
    * The spend ledger. Money is the one quota counter that must survive a

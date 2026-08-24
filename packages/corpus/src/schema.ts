@@ -181,6 +181,29 @@ CREATE TABLE IF NOT EXISTS report_snapshots (
 CREATE INDEX IF NOT EXISTS report_snapshots_prune_idx ON report_snapshots (created_at);
 
 /*
+ * Monitors: standing watches that re-run a category on a schedule and send
+ * the report, diff included, to a webhook. Tenant owned, like reports: a
+ * monitor is a customer's standing order. Fires are submitted under the
+ * owning key label, so every fire pays the owner's quota.
+ */
+CREATE TABLE IF NOT EXISTS monitors (
+  monitor_id       TEXT PRIMARY KEY,   -- mon_ + 16 hex, minted by the server
+  tenant_id        TEXT,
+  key_label        TEXT NOT NULL,
+  subject          TEXT NOT NULL,
+  terms            TEXT NOT NULL DEFAULT '[]',  -- JSON array of question terms
+  webhook_url      TEXT NOT NULL,
+  interval_seconds INTEGER NOT NULL,
+  enabled          INTEGER NOT NULL DEFAULT 1,
+  created_at       INTEGER NOT NULL,
+  last_fired_at    INTEGER NOT NULL DEFAULT 0,  -- zero: immediately due
+  last_result      TEXT                          -- diagnostic, never load bearing
+);
+
+-- The scheduler's only scan: enabled monitors ordered by when they last ran.
+CREATE INDEX IF NOT EXISTS monitors_due_idx ON monitors (enabled, last_fired_at);
+
+/*
  * The spend ledger: every metered dollar, appended as it is charged.
  *
  * The quota module keeps its counters in memory, which is right for request

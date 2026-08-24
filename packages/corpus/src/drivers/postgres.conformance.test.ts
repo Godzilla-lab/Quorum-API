@@ -35,7 +35,7 @@
  */
 
 import { test } from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -68,7 +68,13 @@ if (!PG_URL) {
 
     await client.exec(`CREATE SCHEMA ${schema}`);
     await client.exec(`SET search_path TO ${schema}`);
-    for (const file of ['001_initial.sql', '002_rls.sql', '003_webhook_deliveries.sql', '004_report_snapshots.sql', '005_spend_ledger.sql']) {
+    /*
+     * Read from the directory, never from a list. A hard coded list is how
+     * migration 006 shipped to the live database while every one of these
+     * suites quietly tested a schema without it, found 2026-08-24 by five
+     * red tests. Sorted, because application order is the migration contract.
+     */
+    for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()) {
       await client.exec(readFileSync(join(MIGRATIONS, file), 'utf8'));
     }
 

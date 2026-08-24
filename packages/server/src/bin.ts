@@ -325,6 +325,7 @@ const queue = createJobQueue({
       warmth: result.warmth,
       degraded: result.retrieval?.degraded ?? [],
       cost: result.cost,
+      diff: result.diff,
       attested: result.attested,
       gaps: result.gaps,
       silence: result.silence,
@@ -430,6 +431,64 @@ try {
 } catch (err) {
   process.stderr.write(`spend: could not replay the ledger, budgets start fresh this boot: ${err instanceof Error ? err.message : 'unknown'}\n`);
 }
+
+/*
+ * THE MONITOR SCHEDULER. Once a minute, fire every monitor whose interval has
+ * elapsed, as a normal report submission under the owning key: the same
+ * queue, the same per key quota and in flight cap, the same coalescing, and
+ * the monitor's webhook rides the request so the finished payload, diff
+ * included, is delivered and retried by the machinery that already exists.
+ *
+ * A refusal (quota spent, queue full) is recorded on the monitor and consumes
+ * the interval rather than retrying every minute: a monitor fires at most
+ * once per interval, or records why it could not.
+ *
+ * HONEST LIMIT, STATED WHERE THE OPERATOR WILL READ IT: this loop runs only
+ * while the process is awake. On a free tier that sleeps when idle, monitors
+ * fire when something wakes the instance, so an operator who wants clockwork
+ * fires needs an external ping or a tier that does not sleep.
+ */
+const MONITOR_TICK_MS = 60_000;
+const monitorTick = async (): Promise<void> => {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  let due;
+  try {
+    due = await corpus.dueMonitors(nowSeconds);
+  } catch (err) {
+    process.stderr.write(`monitors: due scan failed, next tick in a minute: ${err instanceof Error ? err.message : 'unknown'}\n`);
+    return;
+  }
+  for (const monitor of due) {
+    let result: string;
+    try {
+      const decision = quotas.check(monitor.keyLabel, 'reports');
+      if (!decision.allowed) {
+        result = `skipped: report quota exhausted, retry in ${decision.retryAfterSeconds}s`;
+      } else {
+        const submitted = await queue.submit({
+          subject: monitor.subject,
+          terms: monitor.terms,
+          communities: [],
+          sources: [],
+          includeAds: false,
+          offline: false,
+          capUsd: undefined,
+          deadlineMs: undefined,
+          webhookUrl: monitor.webhookUrl,
+        }, { keyLabel: monitor.keyLabel });
+        result = submitted.ok ? submitted.accepted.id : `refused: ${submitted.message}`;
+      }
+    } catch (err) {
+      result = `failed: ${err instanceof Error ? err.message : 'unknown'}`;
+    }
+    try {
+      await corpus.markMonitorFired(monitor.monitorId, nowSeconds, result);
+    } catch (err) {
+      process.stderr.write(`monitors: could not record a fire for ${monitor.monitorId}: ${err instanceof Error ? err.message : 'unknown'}\n`);
+    }
+  }
+};
+setInterval(() => { void monitorTick(); }, MONITOR_TICK_MS).unref();
 
 /* Doubles as the key request address on the root signpost, so setting it for
  * the SEC also answers the question a stranger has at the front door. */
