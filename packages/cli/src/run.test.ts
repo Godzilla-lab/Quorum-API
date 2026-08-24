@@ -773,18 +773,28 @@ test('a provider being down degrades the prose and nothing else', async () => {
   assert.equal(result.receiptCheck.unresolved.length, 0);
 });
 
-test('a model that throws is a bug in the caller, not swallowed here', async () => {
-  /* Stated rather than tested loosely: `synthesise` promises errors as values
-   * for anything a VENDOR can do. A transport that throws is our own defect and
-   * must not be quietly turned into an empty report. */
+test('a model that throws degrades loudly instead of failing the run', async () => {
+  /*
+   * THIS TEST USED TO ASSERT THE OPPOSITE: that a throwing transport was our
+   * own defect and should reject the whole run rather than be swallowed. The
+   * first production synthesis attempt settled the argument on 2026-08-24. A
+   * platform env var with a trailing newline made node throw at request build
+   * time, the throw propagated exactly as the old contract demanded, and a
+   * customer's completed retrieval was thrown away over whitespace. The half
+   * of the old rule worth keeping is loudness, so the error must be ON the
+   * result where a reader can see it, never a silent null.
+   */
   const askModel: AskModel = async () => { throw new Error('transport defect'); };
-  await assert.rejects(
-    runResearch(options({ synthesise: true }), deps({
-      makeSource: () => sourceYielding('reddit', CORPUS_RECORDS),
-      askModel,
-    })),
-    /transport defect/,
-  );
+  const result = await runResearch(options({ synthesise: true }), deps({
+    makeSource: () => sourceYielding('reddit', CORPUS_RECORDS),
+    askModel,
+  }));
+
+  assert.equal(result.synthesis?.error, 'transport defect', 'the defect is reported, not swallowed');
+  assert.deepEqual(result.synthesis?.claims, []);
+  /* Every deterministic number is untouched, same as a provider being down. */
+  assert.equal(result.claims.find((c) => c.term === 'quality')?.verdict, 'finding');
+  assert.equal(result.receiptCheck.unresolved.length, 0);
 });
 
 test('the model reasons over exactly the rows the counts came from', async () => {

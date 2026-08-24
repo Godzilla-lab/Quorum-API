@@ -84,19 +84,43 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
     const forModel = [...new Map(
       [...termRows.values()].flat().map((r) => [r.receiptId, r]),
     ).values()];
-    const report = await synthesiseAndResolve(
-      { subject: input.subjectTitle ?? category, terms: [...terms], records: forModel },
-      input.askModel,
-      corpus,
-    );
-    const meter = createCostMeter({ label: 'quorum-hosted-synthesis' });
-    if (report.model && report.usage) {
-      meter.usage(report.model, {
-        input_tokens: report.usage.inputTokens,
-        output_tokens: report.usage.outputTokens,
-      });
+    /*
+     * A SYNTHESIS FAILURE COSTS THE PROSE AND NOTHING ELSE. The layers below
+     * already return errors as values, and this catch is the belt for
+     * whatever they have not met yet: the first production synthesis attempt
+     * (2026-08-24) failed a customer's whole report because a malformed env
+     * var made the transport throw at request build time. The arithmetic
+     * findings above owed that caller nothing model shaped.
+     */
+    try {
+      const report = await synthesiseAndResolve(
+        { subject: input.subjectTitle ?? category, terms: [...terms], records: forModel },
+        input.askModel,
+        corpus,
+      );
+      const meter = createCostMeter({ label: 'quorum-hosted-synthesis' });
+      if (report.model && report.usage) {
+        meter.usage(report.model, {
+          input_tokens: report.usage.inputTokens,
+          output_tokens: report.usage.outputTokens,
+        });
+      }
+      synthesis = { ...report, costUsd: meter.total() };
+    } catch (cause) {
+      synthesis = {
+        model: null,
+        claims: [],
+        fabrication: {
+          claimsChecked: 0, idsCited: 0, idsFabricated: 0,
+          quotesChecked: 0, quotesUnsupported: 0, claimsRejected: 0, clean: true,
+        },
+        discarded: [],
+        evidence: { records: 0, truncated: 0, characters: 0 },
+        usage: null,
+        error: cause instanceof Error ? cause.message : 'synthesis failed',
+        costUsd: 0,
+      };
     }
-    synthesis = { ...report, costUsd: meter.total() };
   }
 
   const warmth = await corpus.categoryStats(category);

@@ -177,7 +177,8 @@ export async function readImage(
   env: Env,
   options: VisionOptions,
 ): Promise<VisionResult> {
-  const key = env['OPENROUTER_API_KEY'];
+  /* Trimmed for the reason given in claims.ts: a pasted key carries a newline. */
+  const key = env['OPENROUTER_API_KEY']?.trim();
   if (!key) return { ok: false, error: 'vision not configured' };
 
   const kind = options.kind ?? 'transcription';

@@ -721,28 +721,52 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
       const forModel = [...new Map(
         [...claimRecords.values()].flat().map((r) => [r.receiptId, r]),
       ).values()];
-      synthesis = await synthesiseAndResolve(
-        {
-          subject: resolvedSubject.title || category,
-          terms: options.terms,
-          records: forModel,
-        },
-        deps.askModel,
-        corpus,
-      );
+      /*
+       * The belt over the error-as-value layers below it: a synthesis failure
+       * of ANY shape costs the prose and nothing else. The hosted path
+       * learned this live on 2026-08-24 when a transport level throw failed
+       * a whole report; the CLI had the same exposure.
+       */
+      try {
+        synthesis = await synthesiseAndResolve(
+          {
+            subject: resolvedSubject.title || category,
+            terms: options.terms,
+            records: forModel,
+          },
+          deps.askModel,
+          corpus,
+        );
+      } catch (cause) {
+        /* Degraded, not null: the error must be ON the result where a reader
+         * and a test can see it, or a defect gets swallowed into silence,
+         * which is the half of the old "let it throw" rule worth keeping. */
+        synthesis = {
+          model: null,
+          claims: [],
+          fabrication: {
+            claimsChecked: 0, idsCited: 0, idsFabricated: 0,
+            quotesChecked: 0, quotesUnsupported: 0, claimsRejected: 0, clean: true,
+          },
+          discarded: [],
+          evidence: { records: 0, truncated: 0, characters: 0 },
+          usage: null,
+          error: cause instanceof Error ? cause.message : 'synthesis failed',
+        };
+      }
       /*
        * Charged from the tokens the provider reported rather than from an
        * estimate. A free model reports real token counts and charges nothing,
        * which is the honest zero; a paid one charges its rate card.
        */
-      if (synthesis.model && synthesis.usage) {
+      if (synthesis?.model && synthesis.usage) {
         cost.usage(synthesis.model, {
           input_tokens: synthesis.usage.inputTokens,
           output_tokens: synthesis.usage.outputTokens,
         });
       }
-      if (synthesis.error) log(`synthesis degraded: ${synthesis.error}`);
-      else log(`${synthesis.model} wrote ${synthesis.claims.length} claims, ${synthesis.fabrication.idsFabricated} invented ids`);
+      if (synthesis?.error) log(`synthesis degraded: ${synthesis.error}`);
+      else if (synthesis) log(`${synthesis.model} wrote ${synthesis.claims.length} claims, ${synthesis.fabrication.idsFabricated} invented ids`);
     }
 
     /*

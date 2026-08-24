@@ -69,6 +69,28 @@ test('no key is a value on the result, and the wire is never touched', async () 
   assert.equal(claimsConfigured(ENV), true);
 });
 
+/*
+ * Both taken from the live 2026-08-24 incident: the platform env var carried a
+ * trailing newline, node refused to build the request with "Invalid character
+ * in header content", the throw escaped every layer, and the first production
+ * synthesis attempt failed a customer's whole report over whitespace.
+ */
+test('a pasted key with a stray newline still builds a clean header', async () => {
+  const { post, sent } = transport({ body: answer('{"claims":[]}') });
+  const result = await askClaims({ OPENROUTER_API_KEY: ' test-key\n' }, { post })(REQUEST);
+  assert.equal(result.ok, true);
+  assert.equal(sent[0]!.headers['authorization'], 'Bearer test-key');
+});
+
+test('A TRANSPORT THAT THROWS IS AN ERROR ON THE RESULT, NEVER A THROW', async () => {
+  const post = async (): Promise<never> => {
+    throw new TypeError('Invalid character in header content ["authorization"]');
+  };
+  const result = await askClaims(ENV, { post, model: 'one/model' })(REQUEST);
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /Invalid character/, 'the cause is reported, not swallowed');
+});
+
 test('the schema is sent, because without it the models answer in prose', async () => {
   const { post, sent } = transport({ body: answer('{"claims":[]}') });
   await askClaims(ENV, { post })(REQUEST);

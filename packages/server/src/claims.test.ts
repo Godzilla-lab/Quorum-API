@@ -99,6 +99,25 @@ test('a model quoting words nobody said lands in rejected, not in findings', asy
   } finally { await corpus.close(); }
 });
 
+/* The live 2026-08-24 case: the transport THREW rather than failing, and the
+ * whole report died. An exception of any shape must degrade, not propagate. */
+test('an askModel that throws still returns the arithmetic report', async () => {
+  const corpus = await seeded();
+  const ask: AskModel = async () => {
+    throw new TypeError('Invalid character in header content ["authorization"]');
+  };
+  try {
+    const claims = await computeClaims({
+      corpus, category: 'running shoes', terms: ['sizing'],
+      retrieval: null, subjectResolved: false, askModel: ask,
+    });
+    assert.equal(claims.findings.length, 1, 'the findings owed nothing model shaped');
+    const synthesis = claims.synthesis as { error?: string; claims: unknown[]; costUsd: number };
+    assert.match(synthesis.error ?? '', /Invalid character/);
+    assert.equal(synthesis.costUsd, 0);
+  } finally { await corpus.close(); }
+});
+
 test('a model being down costs the prose and nothing else', async () => {
   const corpus = await seeded();
   const ask: AskModel = async () => ({ ok: false, error: 'provider unreachable' });

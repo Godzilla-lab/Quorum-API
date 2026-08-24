@@ -144,7 +144,8 @@ export async function expandSubject(
   env: Env,
   options: ExpandOptions,
 ): Promise<ExpansionResult> {
-  const key = env['OPENROUTER_API_KEY'];
+  /* Trimmed for the reason given in claims.ts: a pasted key carries a newline. */
+  const key = env['OPENROUTER_API_KEY']?.trim();
   if (!key) return { ok: false, error: 'expansion not configured' };
 
   const models = options.model ? [options.model] : [...EXPANSION_MODELS];

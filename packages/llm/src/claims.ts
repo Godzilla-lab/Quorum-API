@@ -143,29 +143,53 @@ function usageFrom(payload: unknown): ModelUsage | undefined {
  */
 export function askClaims(env: Env, options: ClaimsOptions): AskModel {
   return async (request) => {
-    const key = env['OPENROUTER_API_KEY'];
+    /*
+     * TRIMMED, BECAUSE A PASTED KEY CARRIES A NEWLINE. Measured live
+     * 2026-08-24 on the hosted instance: the env var on the platform ended in
+     * a stray character, node refused to build the request with "Invalid
+     * character in header content", and the FIRST production synthesis
+     * attempt failed a customer's report over whitespace. No real bearer
+     * token begins or ends with whitespace, so trimming cannot break a valid
+     * key and un-breaks the only way this one was ever going to be supplied.
+     */
+    const key = env['OPENROUTER_API_KEY']?.trim();
     if (!key) return { ok: false, error: 'synthesis not configured, set OPENROUTER_API_KEY' };
 
     const models = options.model ? [options.model] : [...CLAIMS_MODELS];
     const attempts: string[] = [];
 
     for (const model of models) {
-      const response = await options.post(ENDPOINT, {
-        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-        timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: request.system },
-            { role: 'user', content: request.prompt },
-          ],
-          /* Sent whether or not the model honours it. See the header. */
-          response_format: {
-            type: 'json_schema',
-            json_schema: { name: 'claims', strict: true, schema: request.schema },
-          },
-        }),
-      });
+      /*
+       * THE TRANSPORT CAN THROW BEFORE IT CAN FAIL. Errors are values on the
+       * result anywhere a vendor can be down, and the transport is part of
+       * anywhere: node rejects a malformed header at request BUILD time, so
+       * the throw happens before any network error handling gets a say.
+       * Measured live 2026-08-24: that throw escaped all the way up and
+       * failed a customer's report, when the contract of this function is
+       * that a synthesis problem costs the prose and nothing else.
+       */
+      let response;
+      try {
+        response = await options.post(ENDPOINT, {
+          headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+          timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          body: JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: request.system },
+              { role: 'user', content: request.prompt },
+            ],
+            /* Sent whether or not the model honours it. See the header. */
+            response_format: {
+              type: 'json_schema',
+              json_schema: { name: 'claims', strict: true, schema: request.schema },
+            },
+          }),
+        });
+      } catch (err) {
+        attempts.push(`${model}: ${err instanceof Error ? err.message : 'the transport failed'}`);
+        continue;
+      }
 
       if (!response.ok) {
         attempts.push(`${model}: ${response.error ?? `status ${response.status}`}`);
