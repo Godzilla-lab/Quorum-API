@@ -150,11 +150,12 @@ test('a run where nearly everything was vouched for by its container is flagged'
   const s = assessSufficiency({
     retrieval: retrieval({
       totalSeen: 400, totalWritten: 300,
-      outcomes: [outcome({ recordsSeen: 400, recordsWritten: 300, recordsChannelVouched: 280 })],
+      outcomes: [outcome({ recordsSeen: 400, recordsWritten: 300, recordsChannelVouched: 350 })],
     }),
     claims, corpusRecords: 300, subjectResolved: false,
   });
   assert.match(s.warnings.join(' '), /never name the subject themselves/);
+  assert.match(s.warnings.join(' '), /350 of the 400 records the gate accepted/);
 });
 
 test('a healthy share of elliptical comments in scoped communities is not flagged', () => {
@@ -167,6 +168,24 @@ test('a healthy share of elliptical comments in scoped communities is not flagge
     claims, corpusRecords: 300, subjectResolved: true,
   });
   assert.deepEqual(s.warnings, [], '"Same, had to size up" inside a shoe community is the product working');
+});
+
+/*
+ * The first live report after the alarm shipped: 2861 seen, 345 written
+ * because a warm corpus dedupes re-seen rows away, 1235 vouched. Divided by
+ * `stored` that printed "1235 of 345", an impossibility, and fired on a
+ * healthy 59% share. The denominator has to be what the gate accepted.
+ */
+test('a warm corpus rerun cannot produce an impossible vouched share', () => {
+  const claims = [corroborate('sizing', [doc('a'), doc('b'), doc('c')])];
+  const s = assessSufficiency({
+    retrieval: retrieval({
+      totalSeen: 2861, totalWritten: 345,
+      outcomes: [outcome({ recordsSeen: 2861, recordsGated: 761, recordsWritten: 345, recordsChannelVouched: 1235 })],
+    }),
+    claims, corpusRecords: 1750, subjectResolved: false,
+  });
+  assert.deepEqual(s.warnings, [], '1235 of 2100 accepted is 59%, under the alarm share');
 });
 
 test('an offline run with a warm corpus is still assessed', () => {

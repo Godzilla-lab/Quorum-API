@@ -108,16 +108,24 @@ export function assessSufficiency(input: SufficiencyInput): Sufficiency {
 
   /*
    * The second alarm on the same failure, from the other side. The pass rate
-   * says the gate rejected nothing; this says that of what was stored, almost
-   * none of it names the subject in its own words. Either alone can be
+   * says the gate rejected nothing; this says that of what the gate ACCEPTED,
+   * almost none of it names the subject in its own words. Either alone can be
    * innocent. A run where nearly everything was vouched for by its container
    * is a run whose evidence is about whatever those containers are actually
    * about, which on a one word subject is not the subject.
+   *
+   * THE DENOMINATOR IS WHAT THE GATE ACCEPTED, NOT WHAT WAS WRITTEN. On a
+   * warm corpus most accepted records are re-seen rows the write dedupes
+   * away, so `stored` undercounts what the vouch tally counted. The first
+   * live report after this alarm shipped printed "1235 of 345 stored
+   * records", an impossibility, and fired on a healthy 59% share. Measured
+   * 2026-08-24 on the hosted instance.
    */
   const vouched = input.retrieval?.outcomes.reduce((n, o) => n + (o.recordsChannelVouched ?? 0), 0) ?? 0;
-  if (stored >= GATE_ALARM_MIN_SEEN && vouched / stored > CHANNEL_VOUCH_ALARM_SHARE) {
+  const accepted = seen - rejected;
+  if (accepted >= GATE_ALARM_MIN_SEEN && vouched / accepted > CHANNEL_VOUCH_ALARM_SHARE) {
     warnings.push(
-      `${vouched} of ${stored} stored records never name the subject themselves and were vouched for by a community name or thread title, so the evidence may be about what those places discuss rather than the subject as asked`,
+      `${vouched} of the ${accepted} records the gate accepted never name the subject themselves and were vouched for by a community name or thread title, so the evidence may be about what those places discuss rather than the subject as asked`,
     );
   }
 
