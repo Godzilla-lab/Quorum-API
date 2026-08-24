@@ -13,7 +13,7 @@
  */
 
 import {
-  assessSufficiency, corroborate, discoverThemes, shareOfVoice, trendFor, withEvidence,
+  assessSufficiency, corroborate, discoverThemes, evidenceRowsFor, shareOfVoice, trendFor, withEvidence,
   type ClaimWithEvidence, type RetrievalResult, type Trend,
 } from '@quorum/core';
 import type { CorpusDriver, Doc } from '@quorum/corpus';
@@ -46,7 +46,11 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
 
   const claims: ClaimWithEvidence[] = [];
   for (const term of terms) {
-    const rows: Doc[] = await corpus.search(term, { category, limit: EVIDENCE_PER_TERM });
+    const found: Doc[] = await corpus.search(term, { category, limit: EVIDENCE_PER_TERM });
+    /* "had absolutely no problem" is praise, not a problems receipt. The
+     * stance filter drops records whose every mention of a complaint shaped
+     * term is negated. See stance.ts for why it names its terms. */
+    const rows = evidenceRowsFor(term, found);
     /* The same rows that produced the count produce the sample, so a quote can
      * never come from a record that was not counted. */
     claims.push(withEvidence(corroborate(term, rows), rows));

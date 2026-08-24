@@ -21,7 +21,7 @@ import {
 import {
   adsForVerdict, assessSufficiency, attestedFindings, attestedSilence, compareSides, corroborate,
   createCostMeter, formatVerdict, notableGaps, productReviewDocs, retrieveAds, retrieveAll,
-  diffReports, discoverThemes, parseSnapshot, reportSnapshot, shareOfVoice,
+  diffReports, discoverThemes, evidenceRowsFor, parseSnapshot, reportSnapshot, shareOfVoice,
   synthesiseAndResolve, tierGap, trendFor, withEvidence,
   type AdRetrievalResult, type AskModel, type AttestedFindings, type AttestedSilence,
   type Comparison, type CompareSide,
@@ -620,7 +620,11 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
      * Re-querying would let a gap point at evidence the claim did not use. */
     const claimRecords = new Map<string, Doc[]>();
     for (const term of options.terms) {
-      const rows: Doc[] = await corpus.search(term, { category, limit: EVIDENCE_PER_TERM, ...window });
+      const found: Doc[] = await corpus.search(term, { category, limit: EVIDENCE_PER_TERM, ...window });
+      /* "had absolutely no problem" is praise, not a problems receipt. The
+       * stance filter drops records whose every mention of a complaint shaped
+       * term is negated. See stance.ts for why it names its terms. */
+      const rows = evidenceRowsFor(term, found);
       claimRecords.set(term, rows);
       /* The same rows that produced the count produce the sample, so a quote can
        * never come from a record that was not counted. */

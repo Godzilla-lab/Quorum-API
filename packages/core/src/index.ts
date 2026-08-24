@@ -10,6 +10,7 @@ export * from "./retrieve.ts";
 export * from "./retrieve-ads.ts";
 export * from "./synthesise.ts";
 export * from "./evidence.ts";
+export * from "./stance.ts";
 export * from "./attested.ts";
 export * from "./product-reviews.ts";
 export * from "./divergence.ts";
