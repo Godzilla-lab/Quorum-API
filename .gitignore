@@ -36,3 +36,5 @@ tasks/
 
 # npm publish staging, built by scripts/publish-npm.mjs
 .npm-staging/
+*.egg-info/
+packages/sdk-py/dist/
