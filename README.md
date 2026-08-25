@@ -161,7 +161,7 @@ does not resolve, the run exits non zero and says which one.
 | **CLI** | Working, every flag |
 | **MCP server** | Working, five tools over stdio, four of them also remote at `/mcp` |
 | **JavaScript SDK** | Working, 11 methods |
-| **Python SDK** | Working, 14 methods, standard library only. In repo, not yet on PyPI |
+| **Python SDK** | **Published**: `pip install quorum-api`. 14 methods, standard library only |
 | **Webhooks** | Working. Signed to Standard Webhooks, durable, retried for about 75 hours |
 | **Hosted API** | **Deployed and live** at https://quorum-api-j15n.onrender.com, on PostgreSQL, verified against the running instance |
 | **npm** | **Published**: `npx quorum-api "running shoes"`. Five packages, zero external dependencies |
@@ -386,8 +386,11 @@ The same client in Python, in [packages/sdk-py](packages/sdk-py), written
 against the same spec with the same two decisions: errors are values, never
 raised, and `wait_for_report` honours `Retry-After` so a busy service is not
 reported as a broken one. Standard library only, no dependencies, and the
-transport is injectable so its tests run with no network. Not yet on PyPI;
-install from the repo with `pip install packages/sdk-py`.
+transport is injectable so its tests run with no network.
+
+```bash
+pip install quorum-api
+```
 
 ```python
 from quorum_api import QuorumClient

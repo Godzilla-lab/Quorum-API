@@ -1,3 +1,17 @@
+Metadata-Version: 2.4
+Name: quorum-api
+Version: 0.1.0
+Summary: Typed Python client for the Quorum market evidence API. Errors are values, Retry-After is honoured, zero dependencies.
+Author: Quorum
+License: Apache-2.0
+Project-URL: Homepage, https://github.com/Godzilla-lab/Quorum-API
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+
 # quorum-api (Python)
 
 The typed Python client for the Quorum market evidence API. Written against
@@ -25,8 +39,10 @@ if accepted.ok:
 record = client.get_evidence("rc_4d6d444821b0044f")
 ```
 
+Not yet published to PyPI. Install from the repo:
+
 ```bash
-pip install quorum-api
+pip install packages/sdk-py
 ```
 
 Tests: `python3 -m unittest discover -s packages/sdk-py/tests`
