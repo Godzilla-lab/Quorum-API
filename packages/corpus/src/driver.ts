@@ -130,6 +130,13 @@ export interface CorpusDriver {
    */
   saveReportSnapshot(snapshot: ReportSnapshotInput): Promise<void>;
   getReportSnapshot(reportId: string): Promise<StoredReportSnapshot | null>;
+  /*
+   * How many reports each tenant has landed since a cutoff, so a restart can
+   * re-seed the hourly report quota instead of handing every key a fresh
+   * window. Only terminal reports snapshot, so a run killed by the restart
+   * is not counted, which errs toward the caller.
+   */
+  reportCountsSince(since: number): Promise<{ tenantId: string | null; count: number }[]>;
   /* Snapshots are all settled by definition, so age is the only criterion.
    * Returns the number removed. */
   pruneReportSnapshots(before: number): Promise<number>;

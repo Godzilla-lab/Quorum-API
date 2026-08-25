@@ -433,6 +433,31 @@ try {
 }
 
 /*
+ * REPLAY THE REPORT COUNTERS THE SAME WAY. A free tier instance recycles
+ * constantly, and every recycle used to hand every key a fresh hourly
+ * window: measured 2026-08-25, one warming session saw three restarts in an
+ * afternoon, each a silent refill. Terminal reports persist as snapshots, so
+ * the last hour's count rebuilds from them. Same failure posture as spend:
+ * degrade to a fresh window and say so, never refuse to boot.
+ */
+try {
+  const seeded = await corpus.reportCountsSince(
+    Math.floor(Date.now() / 1000) - Math.floor(DEFAULT_LIMITS.reportWindowMs / 1000),
+  );
+  /* The null tenant is the open instance's single user, and http.ts meters
+   * that caller as 'self-hosted'. The seed must land on the same label the
+   * next request will be checked under, or it seeds a ghost. */
+  const entries = seeded.map((s) => ({ keyLabel: s.tenantId ?? 'self-hosted', count: s.count }));
+  if (entries.length) {
+    quotas.seedReports(entries);
+    const total = entries.reduce((n, e) => n + e.count, 0);
+    process.stderr.write(`quotas: replayed ${total} report(s) across ${entries.length} key(s) from snapshots\n`);
+  }
+} catch (err) {
+  process.stderr.write(`quotas: could not replay report counts, windows start fresh this boot: ${err instanceof Error ? err.message : 'unknown'}\n`);
+}
+
+/*
  * THE MONITOR SCHEDULER. Once a minute, fire every monitor whose interval has
  * elapsed, as a normal report submission under the owning key: the same
  * queue, the same per key quota and in flight cap, the same coalescing, and

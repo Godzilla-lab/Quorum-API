@@ -680,6 +680,35 @@ export function runConformanceSuite(
     });
   });
 
+  test(`${driverName}: report counts since a cutoff, per tenant, for the quota replay`, async () => {
+    await withClock(async (c, clock) => {
+      await c.saveReportSnapshot({
+        reportId: 'rep_0000000000000001', tenantId: 'key-1', category: 'shoes',
+        status: 'complete', payload: '{}',
+      });
+      clock.advanceSeconds(4000);
+      await c.saveReportSnapshot({
+        reportId: 'rep_0000000000000002', tenantId: 'key-1', category: 'shoes',
+        status: 'complete', payload: '{}',
+      });
+      await c.saveReportSnapshot({
+        reportId: 'rep_0000000000000003', tenantId: 'key-2', category: 'desks',
+        status: 'failed', payload: '{}',
+      });
+      await c.saveReportSnapshot({
+        reportId: 'rep_0000000000000004', category: 'desks',
+        status: 'complete', payload: '{}',
+      });
+
+      /* An hour back from now: the first snapshot is 4000s old and outside. */
+      const counts = await c.reportCountsSince(clock.now() - 3600);
+      const byTenant = new Map(counts.map((r) => [r.tenantId, r.count]));
+      assert.equal(byTenant.get('key-1'), 1, 'the old report fell out of the window');
+      assert.equal(byTenant.get('key-2'), 1, 'a failed report still consumed its quota slot');
+      assert.equal(byTenant.get(null), 1, 'the null tenant is a tenant like any other');
+    });
+  });
+
   test(`${driverName}: snapshots prune by age and nothing else`, async () => {
     await withClock(async (c, clock) => {
       await c.saveReportSnapshot({

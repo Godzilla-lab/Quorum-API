@@ -588,6 +588,16 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       };
     },
 
+    async reportCountsSince(since: number): Promise<{ tenantId: string | null; count: number }[]> {
+      const rows = await sql.query<{ tenant_id: string | null; count: unknown }>(
+        `SELECT tenant_id, COUNT(*) AS count
+         FROM report_snapshots WHERE created_at >= $1
+         GROUP BY tenant_id`,
+        [since],
+      );
+      return rows.map((r) => ({ tenantId: r.tenant_id, count: num(r.count) }));
+    },
+
     async pruneReportSnapshots(before: number): Promise<number> {
       const rows = await sql.query<{ report_id: string }>(
         'DELETE FROM report_snapshots WHERE created_at < $1 RETURNING report_id',

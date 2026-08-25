@@ -41,6 +41,11 @@ export interface UsageSnapshot {
   keyPrefix: string;
   periodStart: number;
   periodEnd: number;
+  /* The reports window rolls on its own schedule (an hour, not a minute), so
+   * it carries its own period. See the reportWindowMs comment for the defect
+   * that made this explicit. */
+  reportsPeriodStart: number;
+  reportsPeriodEnd: number;
   reports: QuotaState;
   lookups: QuotaState;
   concurrentReports: { running: number; limit: number };
@@ -60,6 +65,15 @@ export interface QuotaLimits {
    * here so a caller sees all three ceilings in one place. */
   concurrentReports: number;
   windowMs: number;
+  /*
+   * The reports window, SEPARATE from the request window. Found 2026-08-25:
+   * the comment on reportsPerWindow promised twenty an hour while the code
+   * rolled reports inside the same sixty second window as lookups, which is
+   * twenty a MINUTE, or 1,200 an hour. A loop stopper that permits 1,200
+   * loops an hour stops nothing. Reports now roll hourly, as documented
+   * everywhere else, and lookups keep their minute.
+   */
+  reportWindowMs: number;
   /*
    * METERED SPEND, IN DOLLARS, AND THE ONLY LIMIT HERE THAT BOUNDS A BILL.
    *
@@ -102,6 +116,7 @@ export const DEFAULT_LIMITS: QuotaLimits = {
   lookupsPerWindow: 600,
   concurrentReports: 3,
   windowMs: 60_000,
+  reportWindowMs: 60 * 60_000,
   /* Zero until an operator says otherwise. See the field comments. */
   spendPerKeyUsd: 0,
   spendTotalUsd: 0,
@@ -114,6 +129,9 @@ export type Meter = 'reports' | 'lookups' | 'exempt';
 
 interface KeyRecord {
   windowStart: number;
+  /* Reports roll hourly, lookups per minute. Separate starts, or one window
+   * silently governs both, which is the defect this field ended. */
+  reportWindowStart: number;
   /* Rolls on its own schedule, because a budget is daily and a rate is per
    * minute. Sharing one window would reset the budget every minute. */
   spendWindowStart: number;
@@ -168,6 +186,16 @@ export interface Quotas {
    * a crash is an inconvenience, refilling one is a bill.
    */
   seedSpend(entries: readonly { keyLabel: string; totalUsd: number }[], now?: number): void;
+  /*
+   * Seed the report counters from persisted report snapshots, once, at boot.
+   * A free tier instance recycles constantly, and every recycle used to hand
+   * every key a fresh twenty: measured 2026-08-25, one warming session saw
+   * three restarts in an afternoon, each a silent quota refill. Same
+   * over-enforcement direction as seedSpend: the seeded window starts NOW,
+   * so a caller waits slightly longer after a crash rather than getting a
+   * refill from one.
+   */
+  seedReports(entries: readonly { keyLabel: string; count: number }[], now?: number): void;
   /* What `GET /v1/usage` returns. */
   snapshot(keyLabel: string, running: number, now?: number): UsageSnapshot;
   /* Every key seen since start, for an operator. Never includes a key itself. */
@@ -198,7 +226,7 @@ export function createQuotas(
     let rec = keys.get(keyLabel);
     if (!rec) {
       rec = {
-        windowStart: now, spendWindowStart: now, spendInWindow: 0,
+        windowStart: now, reportWindowStart: now, spendWindowStart: now, spendInWindow: 0,
         reports: 0, lookups: 0,
         totalReports: 0, totalLookups: 0, spendUsd: 0,
         firstSeen: now, lastSeen: now,
@@ -212,8 +240,11 @@ export function createQuotas(
      */
     if (now - rec.windowStart >= limits.windowMs) {
       rec.windowStart = now;
-      rec.reports = 0;
       rec.lookups = 0;
+    }
+    if (now - rec.reportWindowStart >= limits.reportWindowMs) {
+      rec.reportWindowStart = now;
+      rec.reports = 0;
     }
     if (now - rec.spendWindowStart >= limits.spendWindowMs) {
       rec.spendWindowStart = now;
@@ -229,7 +260,11 @@ export function createQuotas(
   return {
     check(keyLabel, meter, now = Date.now()) {
       const rec = record(keyLabel, now);
-      const retryAfterSeconds = Math.max(1, Math.ceil((rec.windowStart + limits.windowMs - now) / 1000));
+      /* The wait a refusal quotes is the wait for the window that refused:
+       * up to an hour for a report, up to a minute for anything else. */
+      const retryAfterSeconds = meter === 'reports'
+        ? Math.max(1, Math.ceil((rec.reportWindowStart + limits.reportWindowMs - now) / 1000))
+        : Math.max(1, Math.ceil((rec.windowStart + limits.windowMs - now) / 1000));
 
       if (meter === 'exempt') {
         /* Healthz is how a load balancer decides this process is alive.
@@ -324,6 +359,17 @@ export function createQuotas(
       }
     },
 
+    seedReports(entries, now = Date.now()) {
+      for (const { keyLabel, count } of entries) {
+        if (!Number.isInteger(count) || count <= 0) continue;
+        const rec = record(keyLabel, now);
+        rec.reports += count;
+        /* The window counter only. Lifetime totals stay process local,
+         * because seeding them again after every restart would count one
+         * report once per boot. */
+      }
+    },
+
     snapshot(keyLabel, running, now = Date.now()) {
       const rec = record(keyLabel, now);
       return {
@@ -334,6 +380,8 @@ export function createQuotas(
         keyPrefix: keyLabel,
         periodStart: Math.floor(rec.windowStart / 1000),
         periodEnd: Math.floor((rec.windowStart + limits.windowMs) / 1000),
+        reportsPeriodStart: Math.floor(rec.reportWindowStart / 1000),
+        reportsPeriodEnd: Math.floor((rec.reportWindowStart + limits.reportWindowMs) / 1000),
         reports: stateOf(rec.reports, limits.reportsPerWindow),
         lookups: stateOf(rec.lookups, limits.lookupsPerWindow),
         concurrentReports: { running, limit: limits.concurrentReports },

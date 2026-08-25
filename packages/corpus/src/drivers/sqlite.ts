@@ -671,6 +671,15 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       return Number(result.changes);
     },
 
+    async reportCountsSince(since: number): Promise<{ tenantId: string | null; count: number }[]> {
+      const rows = db.prepare(`
+        SELECT tenant_id, COUNT(*) AS count
+        FROM report_snapshots WHERE created_at >= ?
+        GROUP BY tenant_id
+      `).all(since) as unknown as { tenant_id: string | null; count: number }[];
+      return rows.map((r) => ({ tenantId: r.tenant_id, count: Number(r.count) }));
+    },
+
     async createMonitor(monitor: MonitorInput): Promise<void> {
       db.prepare(`
         INSERT INTO monitors

@@ -1926,13 +1926,20 @@ components:
 
     Usage:
       type: object
-      required: [keyPrefix, periodStart, periodEnd, reports, lookups, concurrentReports, spendUsd]
+      required: [keyPrefix, periodStart, periodEnd, reportsPeriodStart, reportsPeriodEnd, reports, lookups, concurrentReports, spendUsd]
       properties:
         keyPrefix:
           type: string
           description: The display prefix only. The whole key is never returned or logged.
         periodStart: { type: integer }
         periodEnd: { type: integer }
+        reportsPeriodStart: { type: integer }
+        reportsPeriodEnd:
+          type: integer
+          description: |
+            Reports roll on their own hourly window, separate from the request
+            minute, and the window survives a restart: the counter is re-seeded
+            from persisted reports at boot, so a recycle is not a refill.
         reports:
           $ref: '#/components/schemas/Quota'
         lookups:

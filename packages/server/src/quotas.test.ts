@@ -15,6 +15,7 @@ import { DEFAULT_LIMITS, createQuotas, meterFor, type QuotaLimits } from './quot
 
 const LIMITS: QuotaLimits = {
   reportsPerWindow: 2, lookupsPerWindow: 5, concurrentReports: 3, windowMs: 60_000,
+  reportWindowMs: 3_600_000,
   /* A dollar each, so the per key and instance ceilings can be crossed
    * separately and the tests can tell which one refused. */
   spendPerKeyUsd: 1, spendTotalUsd: 2.5, spendWindowMs: 3_600_000,
@@ -34,7 +35,8 @@ test('a key is allowed up to its limit and refused after it', () => {
   assert.equal(third.allowed, false);
   assert.equal(third.state.used, 2);
   assert.equal(third.state.remaining, 0);
-  assert.ok(third.retryAfterSeconds > 0 && third.retryAfterSeconds <= 60);
+  /* A refused report quotes the report window, which is an hour. */
+  assert.ok(third.retryAfterSeconds > 0 && third.retryAfterSeconds <= 3600);
 });
 
 test('A REFUSED REQUEST IS NOT COUNTED, OR A RETRY LOOP BECOMES A BAN', () => {
@@ -51,8 +53,10 @@ test('A REFUSED REQUEST IS NOT COUNTED, OR A RETRY LOOP BECOMES A BAN', () => {
   const after = q.snapshot('k', 0, at(100));
   assert.equal(after.reports.used, 2, 'fifty refusals added nothing');
 
-  /* And the window still rolls on schedule rather than being pushed out. */
-  assert.equal(q.check('k', 'reports', at(60_001)).allowed, true);
+  /* And the window still rolls on schedule rather than being pushed out.
+   * Reports roll HOURLY: a minute later is still inside the same window. */
+  assert.equal(q.check('k', 'reports', at(60_001)).allowed, false);
+  assert.equal(q.check('k', 'reports', at(3_600_001)).allowed, true);
 });
 
 test('THE TWO METERS DO NOT SHARE A BUDGET', () => {
@@ -80,9 +84,50 @@ test('the window rolls, and rolls clean', () => {
   const q = createQuotas(LIMITS);
   q.check('k', 'reports', at(0));
   q.check('k', 'reports', at(1));
-  assert.equal(q.check('k', 'reports', at(59_999)).allowed, false);
-  assert.equal(q.check('k', 'reports', at(60_000)).allowed, true);
-  assert.equal(q.snapshot('k', 0, at(60_001)).reports.used, 1, 'the new window starts from this request');
+  assert.equal(q.check('k', 'reports', at(3_599_999)).allowed, false);
+  assert.equal(q.check('k', 'reports', at(3_600_000)).allowed, true);
+  assert.equal(q.snapshot('k', 0, at(3_600_001)).reports.used, 1, 'the new window starts from this request');
+});
+
+/*
+ * THE DEFECT THIS SEPARATION ENDED, found 2026-08-25: reports rolled inside
+ * the same sixty second window as lookups, so the documented twenty an hour
+ * was actually twenty a minute, or 1,200 an hour. A loop stopper that
+ * permits 1,200 loops an hour stops nothing.
+ */
+test('REPORTS ROLL HOURLY WHILE LOOKUPS ROLL PER MINUTE, INDEPENDENTLY', () => {
+  const q = createQuotas(LIMITS);
+  q.check('k', 'reports', at(0));
+  q.check('k', 'reports', at(1));
+  for (let i = 0; i < 5; i++) q.check('k', 'lookups', at(2 + i));
+
+  /* A minute later the lookups window has rolled and the reports have not. */
+  assert.equal(q.check('k', 'lookups', at(61_000)).allowed, true, 'lookups rolled');
+  assert.equal(q.check('k', 'reports', at(61_000)).allowed, false, 'reports did not');
+
+  const snap = q.snapshot('k', 0, at(61_000));
+  assert.ok(snap.reportsPeriodEnd - snap.reportsPeriodStart === 3600, 'the reports window states its own hour');
+  assert.ok(snap.periodEnd - snap.periodStart === 60, 'beside the request minute');
+});
+
+test('SEEDED REPORTS SURVIVE THE RESTART THE FREE TIER GUARANTEES', () => {
+  /* Every recycle used to hand every key a fresh twenty. The boot replay
+   * seeds the counter from persisted snapshots, over enforcing (the seeded
+   * window starts now) rather than refilling after a crash. */
+  const q = createQuotas(LIMITS);
+  q.seedReports([{ keyLabel: 'k', count: 2 }], at(0));
+  assert.equal(q.check('k', 'reports', at(1)).allowed, false, 'the pre-restart reports still count');
+  assert.equal(q.check('k', 'lookups', at(2)).allowed, true, 'lookups are untouched by the seed');
+  assert.equal(q.snapshot('k', 0, at(3)).reports.used, 2);
+
+  /* Garbage in the ledger seeds nothing rather than corrupting a counter. */
+  const clean = createQuotas(LIMITS);
+  clean.seedReports([
+    { keyLabel: 'k', count: 0 },
+    { keyLabel: 'k', count: -3 },
+    { keyLabel: 'k', count: 1.5 },
+  ], at(0));
+  assert.equal(clean.check('k', 'reports', at(1)).allowed, true);
 });
 
 test('HEALTHZ IS EXEMPT, BECAUSE A BUSY INSTANCE MUST STILL SAY IT IS ALIVE', () => {
