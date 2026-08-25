@@ -1,4 +1,7 @@
 {
+  "dog-food": { "records": 17, "precision": 0.5, "recall": 1.0 },
+  "espresso-machine": { "records": 29, "precision": 0.894, "recall": 0.772 },
   "love": { "records": 8, "precision": 0.5, "recall": 1.0 },
-  "running-shoes": { "records": 18, "precision": 0.75, "recall": 0.9 }
+  "playwright": { "records": 22, "precision": 0.9, "recall": 0.6 },
+  "running-shoes": { "records": 41, "precision": 0.825, "recall": 0.825 }
 }
