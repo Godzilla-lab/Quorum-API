@@ -35,6 +35,11 @@ jobs:
       - name: Test, offline and keyless
         run: sudo unshare -n -- bash -c "ip link set lo up && npm test"
 
+      # The Python SDK's transport is injected in every test, so this runs
+      # inside the same egress blocked namespace as everything else.
+      - name: Python SDK, offline and keyless
+        run: sudo unshare -n -- bash -c "ip link set lo up && npm run test:py"
+
       - name: Copy style
         run: npm run lint:copy
 

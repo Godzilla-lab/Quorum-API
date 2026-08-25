@@ -33,7 +33,7 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'coverage', '.claude']);
 const SKIP_FILES = new Set(['LICENSE', 'package-lock.json']);
-const CHECK_EXT = /\.(md|ts|mts|mjs|js|json|ya?ml|txt)$/;
+const CHECK_EXT = /\.(md|ts|mts|mjs|js|json|ya?ml|txt|py|toml)$/;
 /* Captured vendor payloads. Evidence, not copy. See the header. */
 const CAPTURED_DATA = /[\\/]fixtures[\\/].*\.json$/;
 
