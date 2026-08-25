@@ -395,9 +395,19 @@ export function isRelevantRecord(
    * Capped at two, because a three word subject demanding all three would
    * reject nearly everything a person actually writes.
    */
-  const channelHits = channelKind === 'handle'
-    ? scoreHandle(channel, terms).hits
-    : scoreText(channel, terms).hits;
+  /*
+   * MATCHED WORDS, NOT MATCH COUNTS. Summing hits let the channel and the
+   * text each contribute the SAME word: measured live 2026-08-24, a CPSC
+   * recall filed by "FoodState" about supplement bottles passed a "dog food"
+   * gate because the channel matched "food", the text matched "food", and
+   * one plus one cleared a requirement of two without "dog" appearing
+   * anywhere. The requirement is coverage of the subject, so the sets are
+   * united and the union is what counts: the channel is credited with the
+   * part it really carries, and the record must supply the REST.
+   */
+  const channelMatched = channelKind === 'handle'
+    ? scoreHandle(channel, terms).matched
+    : scoreText(channel, terms).matched;
 
   /*
    * A PASS THE CONTAINER VOUCHED FOR MUST STILL SAY SOMETHING ITSELF, when
@@ -409,8 +419,8 @@ export function isRelevantRecord(
    * require the subject in the text satisfy it by construction. See
    * vouchedRecordSpeaksForItself for the measurement behind the scoping.
    */
-  const textHits = scoreText(text, terms).hits;
-  const vouchOk = terms.length > 1 || textHits > 0
+  const textMatched = scoreText(text, terms).matched;
+  const vouchOk = terms.length > 1 || textMatched.length > 0
     || vouchedRecordSpeaksForItself(text, contextTerms);
 
   /*
@@ -480,5 +490,6 @@ export function isRelevantRecord(
   if (!terms.length) return vouchOk;
 
   const required = Math.max(minHits, Math.min(terms.length, 2));
-  return textHits + channelHits >= required && vouchOk;
+  const covered = new Set([...textMatched, ...channelMatched]).size;
+  return covered >= required && vouchOk;
 }

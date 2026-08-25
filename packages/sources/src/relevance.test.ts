@@ -267,6 +267,33 @@ test('A SHORT SUBJECT WORD COUNTS AS A WORD, AND NEVER AS A PREFIX', () => {
     'and the plural still counts');
 });
 
+/*
+ * Regression, measured live 2026-08-24 minutes after the fix above deployed:
+ * a CPSC recall filed by "FoodState" about supplement bottles passed the
+ * "dog food" gate anyway, because the channel matched "food", the TEXT also
+ * matched "food", and summing the two counts cleared a requirement of two
+ * without "dog" appearing anywhere. Coverage is a set union, not a sum: the
+ * same word cannot vouch for itself twice.
+ */
+test('THE CHANNEL AND THE TEXT CANNOT COUNT THE SAME WORD TWICE', () => {
+  const terms = subjectTerms(['dog food', 'dog food']);
+
+  const recall = 'FoodState Recalls Bottles of MegaFood One Daily Supplements '
+    + 'due to lack of child resistant packaging';
+  assert.equal(isRelevantRecord(recall, 'FoodState', terms), false,
+    'channel "food" plus text "food" is one word of a two word subject');
+
+  /* The legitimate split coverage this rule must preserve: the community
+   * carries one word and the record supplies the other. */
+  assert.equal(
+    isRelevantRecord('the food is too rich for my dog', 'DogFood', terms, { channelKind: 'handle' }),
+    true,
+  );
+  assert.equal(
+    isRelevantRecord('switched brands after the recall', 'DogFood', terms, { channelKind: 'handle' }),
+    true, 'a fully vouching container still carries its elliptical comments');
+});
+
 test('A DUMP THAT MENTIONS THE SUBJECT ONCE IS NOT ABOUT THE SUBJECT', () => {
   const terms = subjectTerms(['running shoes', 'running shoes']);
   const opts = { mode: 'phrase' as const, phrases: ['running shoes'], channelKind: 'handle' as const };
