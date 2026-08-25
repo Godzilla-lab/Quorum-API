@@ -211,3 +211,86 @@ test('one attested record alone is not corroboration', () => {
   assert.equal(r.verdict, 'weak-signal');
   assert.equal(r.basis, 'none');
 });
+
+/*
+ * DISAGREEMENT IS PART OF THE ARITHMETIC, added 2026-08-25 after an outside
+ * evaluator pointed out that eight records reporting a problem and seven
+ * saying "no problems at all" printed as a finding on eight records with the
+ * disagreement thrown away. For a product whose pitch is that corroboration
+ * is arithmetic, that was the arithmetic failing where it matters most.
+ */
+test('BOTH SIDES PAST THE THRESHOLD IS CONTESTED, NEVER A FINDING', () => {
+  const r = corroborate('problems', [
+    doc({ receiptId: 'rc_a', channel: 'running' }),
+    doc({ receiptId: 'rc_b', channel: 'trailrunning' }),
+    doc({ receiptId: 'rc_c', channel: 'shoes' }),
+  ], {
+    refuting: [
+      doc({ receiptId: 'rc_x', channel: 'running' }),
+      doc({ receiptId: 'rc_y', channel: 'sneakers' }),
+      doc({ receiptId: 'rc_z', channel: 'shoes' }),
+    ],
+  });
+  assert.equal(r.verdict, 'contested');
+  assert.equal(r.records, 3, 'the supporting count is intact');
+  assert.equal(r.refuting.records, 3, 'and the disagreement travels beside it');
+  assert.deepEqual(r.refuting.receiptIds, ['rc_x', 'rc_y', 'rc_z']);
+});
+
+test('disagreement below the threshold shapes nothing', () => {
+  /* One "works fine for me" must not un-say a corroborated pattern any more
+   * than one complaint may state one. */
+  const r = corroborate('problems', [
+    doc({ receiptId: 'rc_a', channel: 'running' }),
+    doc({ receiptId: 'rc_b', channel: 'trailrunning' }),
+    doc({ receiptId: 'rc_c', channel: 'shoes' }),
+  ], { refuting: [doc({ receiptId: 'rc_x' })] });
+  assert.equal(r.verdict, 'finding');
+  assert.equal(r.refuting.records, 1, 'reported, so a caller can see it, never gated on alone');
+});
+
+test('ONLY the disagreement past the threshold is refuted', () => {
+  const r = corroborate('problems', [doc({ receiptId: 'rc_a' })], {
+    refuting: [
+      doc({ receiptId: 'rc_x', channel: 'running' }),
+      doc({ receiptId: 'rc_y', channel: 'sneakers' }),
+      doc({ receiptId: 'rc_z', channel: 'shoes' }),
+    ],
+  });
+  assert.equal(r.verdict, 'refuted');
+  assert.equal(r.records, 1);
+});
+
+test('a receipt can never count both for and against a claim', () => {
+  const r = corroborate('problems', [
+    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c' }),
+  ], {
+    refuting: [doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_x' }), doc({ receiptId: 'rc_x' })],
+  });
+  assert.equal(r.records, 3);
+  assert.equal(r.refuting.records, 1, 'rc_a already counted for, rc_x deduped to one voice');
+});
+
+test('no refuting rows means an empty refutation, and findingsOnly still excludes division', () => {
+  const plain = corroborate('sizing', [
+    doc({ receiptId: 'rc_a', channel: 'a' }),
+    doc({ receiptId: 'rc_b', channel: 'b' }),
+    doc({ receiptId: 'rc_c', channel: 'c' }),
+  ]);
+  assert.equal(plain.verdict, 'finding');
+  assert.deepEqual(plain.refuting, { records: 0, channels: 0, receiptIds: [] });
+
+  const contested = corroborate('problems', [
+    doc({ receiptId: 'rc_a', channel: 'a' }),
+    doc({ receiptId: 'rc_b', channel: 'b' }),
+    doc({ receiptId: 'rc_c', channel: 'c' }),
+  ], {
+    refuting: [
+      doc({ receiptId: 'rc_x', channel: 'a' }),
+      doc({ receiptId: 'rc_y', channel: 'b' }),
+      doc({ receiptId: 'rc_z', channel: 'c' }),
+    ],
+  });
+  assert.deepEqual(findingsOnly([plain, contested]).map((c) => c.term), ['sizing'],
+    'a contested claim never reaches a renderer as a finding');
+});

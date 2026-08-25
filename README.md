@@ -13,7 +13,7 @@ rather than a README asserting it.
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/quorum-api.svg)](https://www.npmjs.com/package/quorum-api)
-[![Tests](https://img.shields.io/badge/tests-1%2C218-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1%2C226-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
 
@@ -156,7 +156,7 @@ does not resolve, the run exits non zero and says which one.
 
 | | |
 |---|---|
-| **Engine** | Working. 1,218 tests, offline and keyless |
+| **Engine** | Working. 1,226 tests, offline and keyless |
 | **CLI** | Working, every flag |
 | **MCP server** | Working, five tools over stdio, four of them also remote at `/mcp` |
 | **JavaScript SDK** | Working, 11 methods |
@@ -229,7 +229,7 @@ Working on Quorum itself is the clone path:
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 1,218 tests, offline, no keys
+npm test          # 1,226 tests, offline, no keys
 ```
 
 Then research something. The input is a **subject**, not a URL. Plain text
@@ -745,7 +745,7 @@ npm run test:postgres  # the driver against a real server, needs QUORUM_PG_URL
 
 CI runs the test suite inside a network namespace with no route off the host, so
 an adapter that quietly reaches for the wire fails immediately instead of flaking
-later. Three of the 1,218 tests need a real PostgreSQL server and skip without
+later. Three of the 1,226 tests need a real PostgreSQL server and skip without
 `QUORUM_PG_URL`.
 
 ## License

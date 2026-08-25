@@ -77,6 +77,36 @@ export function mentionsAllNegated(term: string, text: string): boolean {
  * what the evidence says.
  */
 export function evidenceRowsFor(term: string, rows: readonly Doc[]): Doc[] {
-  if (!complaintStem(term)) return [...rows];
-  return rows.filter((row) => !mentionsAllNegated(term, row.text));
+  return splitEvidenceRows(term, rows).supporting;
+}
+
+/*
+ * Both sides of the evidence, not just the side that agrees.
+ *
+ * Until 2026-08-25 the negated records were silently discarded, which meant
+ * eight people reporting a problem and seven saying "no problems at all"
+ * printed as a finding on eight records with the disagreement thrown away.
+ * An outside evaluator called that the arithmetic failing where it matters
+ * most, and they were right: for a product whose pitch is that corroboration
+ * is arithmetic, disagreement is part of the arithmetic.
+ *
+ * A refuting row here is a record whose EVERY mention of a complaint shaped
+ * term is negated: "no problems", "zero issues", "had no complaints". That is
+ * the only refutation this module can detect lexically, and it is the only
+ * kind counted. "Runs small" versus "fits true" is claim level polarity that
+ * lexical matching cannot see, so it is deliberately NOT guessed at; that is
+ * the evals Layer 3 problem, not a heuristic to invent here. For terms
+ * outside the complaint set, `refuting` is always empty.
+ */
+export function splitEvidenceRows(
+  term: string,
+  rows: readonly Doc[],
+): { supporting: Doc[]; refuting: Doc[] } {
+  if (!complaintStem(term)) return { supporting: [...rows], refuting: [] };
+  const supporting: Doc[] = [];
+  const refuting: Doc[] = [];
+  for (const row of rows) {
+    (mentionsAllNegated(term, row.text) ? refuting : supporting).push(row);
+  }
+  return { supporting, refuting };
 }

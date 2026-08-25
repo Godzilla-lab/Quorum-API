@@ -184,8 +184,8 @@ checkEnum('EvidenceTier', null, new Set(Object.keys(TIER_LABEL)));
 {
   const bases = new Set();
   const verdicts = new Set();
-  const drive = (docs) => {
-    const c = corroborate('sizing', docs);
+  const drive = (docs, options) => {
+    const c = corroborate('sizing', docs, options);
     bases.add(c.basis);
     verdicts.add(c.verdict);
     return c;
@@ -198,6 +198,14 @@ checkEnum('EvidenceTier', null, new Set(Object.keys(TIER_LABEL)));
   drive([doc('cpsc', 'r1', 'recall'), doc('nhtsa', 'r2', 'complaint')]);
   /* One record. Not a market pattern. */
   drive([doc('reddit', 'a', 'r/one')]);
+  const threeRefuting = [doc('reddit', 'x', 'r/one'), doc('reddit', 'y', 'r/two'), doc('reddit', 'z', 'r/three')];
+  /* Both sides past the threshold: divided evidence, no conclusion. */
+  drive(
+    [doc('reddit', 'a', 'r/one'), doc('reddit', 'b', 'r/two'), doc('hackernews', 'c', 'story')],
+    { refuting: threeRefuting },
+  );
+  /* Only the disagreement past the threshold. */
+  drive([doc('reddit', 'a', 'r/one')], { refuting: threeRefuting });
 
   checkShape('Corroboration', full, { why: 'driven through all four routes' });
   checkEnum('Corroboration', 'basis', bases, 'each one produced by a real call');

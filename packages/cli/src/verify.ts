@@ -26,7 +26,7 @@
  */
 
 import type { CorpusDriver } from '@quorum/corpus';
-import { fabricationReport, resolveCitations, type FabricationReport, type ModelClaim } from '@quorum/core';
+import { fabricationReport, resolveCitations, type FabricationReport, type ModelClaim, type ResolvedClaim } from '@quorum/core';
 
 export interface VerifyInput {
   claims: ModelClaim[];
@@ -41,7 +41,7 @@ export interface VerifiedClaim {
   resolved: number;
   fabricated: string[];
   unsupportedQuotes: string[];
-  verdict: 'finding' | 'weak-signal' | 'rejected';
+  verdict: ResolvedClaim['verdict'];
   /* Recomputed over the ids that actually resolved, never inherited. */
   records: number;
   demoted: boolean;

@@ -16,7 +16,7 @@
  * because the entire pitch is that the calling agent can check us.
  */
 
-import { corroborate, formatVerdict, adsForVerdict, type Corroboration } from '@quorum/core';
+import { corroborate, formatVerdict, adsForVerdict, splitEvidenceRows, type Corroboration } from '@quorum/core';
 import type { CorpusDriver, Doc } from '@quorum/corpus';
 import type { ToolDefinition } from './protocol.ts';
 
@@ -69,6 +69,16 @@ function corroborationLine(c: Corroboration, atLeast: boolean): string {
    * the floor is stated in the output itself rather than left to a schema
    * note nobody reads at answer time. */
   const records = atLeast ? `at least ${c.records}` : `${c.records}`;
+  /* Divided evidence is stated as division, with both counts, never as
+   * either side alone. This is the arithmetic admitting disagreement. */
+  if (c.verdict === 'contested') {
+    return `**Contested.** ${records} records support this and ${c.refuting.records} say the opposite, `
+      + `both past the threshold of ${c.threshold}. State both counts or state nothing.`;
+  }
+  if (c.verdict === 'refuted') {
+    return `**Refuted.** ${c.refuting.records} records say the opposite, past the threshold of `
+      + `${c.threshold}, while support stayed below it. Do not state the claim as a market pattern.`;
+  }
   return c.verdict === 'finding'
     ? `**Finding.** ${records} independent records across ${c.channels} channels, threshold ${c.threshold}.`
     : `**Weak signal, not a finding.** ${records} records across ${c.channels} channels, `
@@ -129,13 +139,16 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
           + 'Check `category_warmth` to see whether this category has been harvested at all.';
       }
 
-      const c = corroborate(query, hits);
+      /* The same stance split every report applies: a record saying "no
+       * problems" counts AGAINST a problems query, never for it. */
+      const { supporting, refuting } = splitEvidenceRows(query, hits);
+      const c = corroborate(query, supporting, { refuting });
       const out: string[] = [];
       out.push(`## ${query}${category ? ` in ${category}` : ''}`);
       out.push('');
       out.push(corroborationLine(c, hits.length === COUNT_SCAN));
       out.push('');
-      for (const doc of hits.slice(0, QUOTED)) {
+      for (const doc of supporting.slice(0, QUOTED)) {
         out.push(quote(doc));
         out.push('');
       }
@@ -144,6 +157,15 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
         out.push(`More receipts: ${rest.map((id) => `\`${id}\``).join(' ')}`);
         if (c.receiptIds.length > QUOTED + LISTED_IDS) {
           out.push(`...and ${c.receiptIds.length - QUOTED - LISTED_IDS} more.`);
+        }
+        out.push('');
+      }
+      /* "N say otherwise" is a claim like any other and ships its receipts. */
+      if (c.refuting.records > 0) {
+        const refutingListed = c.refuting.receiptIds.slice(0, LISTED_IDS);
+        out.push(`Refuting receipts: ${refutingListed.map((id) => `\`${id}\``).join(' ')}`);
+        if (c.refuting.receiptIds.length > LISTED_IDS) {
+          out.push(`...and ${c.refuting.receiptIds.length - LISTED_IDS} more.`);
         }
         out.push('');
       }

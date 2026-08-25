@@ -87,10 +87,29 @@ export interface Corroboration {
    */
   basis: 'receipt-count' | 'cross-tier' | 'attested' | 'none';
   /*
-   * `finding` may be printed as a statement about the market. `weak-signal` may
-   * not, ever, no matter how good the quotes are.
+   * The records that say the OPPOSITE, counted with the same dedupe rule as
+   * the records that agree. Populated only when the caller supplies refuting
+   * rows (see `splitEvidenceRows` in stance.ts for what qualifies); empty
+   * otherwise, and empty is a real answer meaning no detectable disagreement.
    */
-  verdict: 'finding' | 'weak-signal';
+  refuting: {
+    records: number;
+    channels: number;
+    receiptIds: string[];
+  };
+  /*
+   * `finding` may be printed as a statement about the market. `contested`
+   * means BOTH sides cleared the threshold: report both counts, state no
+   * conclusion. `refuted` means only the disagreement cleared it. Neither of
+   * those may ever be printed as a finding, and `weak-signal` may not either,
+   * no matter how good the quotes are.
+   *
+   * Deliberately four values and not the seven a fact checking taxonomy
+   * offers: a below threshold lean either way is readable from the counts
+   * this object already carries, and a verdict the arithmetic cannot defend
+   * is exactly what this product refuses to print.
+   */
+  verdict: 'finding' | 'contested' | 'refuted' | 'weak-signal';
   /* The threshold actually applied, so a report can show its own working. */
   threshold: number;
 }
@@ -98,6 +117,12 @@ export interface Corroboration {
 export interface CorroborateOptions {
   /* Overridable so a test can drive the boundary without rewriting fixtures. */
   minReceipts?: number;
+  /*
+   * Records that affirmatively contradict the claim, from the stance split.
+   * Counted against the same threshold as the supporting side, because
+   * disagreement corroborated by one voice is not disagreement.
+   */
+  refuting?: readonly Doc[];
 }
 
 export function corroborate(
@@ -157,6 +182,33 @@ export function corroborate(
     : crossTier ? 'cross-tier'
       : attested ? 'attested' : 'none';
 
+  /*
+   * The other side, deduped by receipt id exactly like the supporting side,
+   * because a person saying "no problems" twice is still one person. A row
+   * appearing on both sides is impossible by construction (splitEvidenceRows
+   * partitions), but the dedupe against `seen` guards the invariant anyway:
+   * one receipt must never count both for and against a claim.
+   */
+  const refutingSeen = new Set<string>();
+  const refutingChannels = new Set<string>();
+  const refutingIds: string[] = [];
+  for (const record of options.refuting ?? []) {
+    if (seen.has(record.receiptId) || refutingSeen.has(record.receiptId)) continue;
+    refutingSeen.add(record.receiptId);
+    refutingIds.push(record.receiptId);
+    refutingChannels.add(`${record.source}/${record.channel}`);
+  }
+
+  /*
+   * Disagreement is held to the same bar as agreement: below the threshold it
+   * shapes nothing, because one "works fine for me" must not un-say a
+   * corroborated pattern any more than one complaint may state one.
+   */
+  const refuted = refutingSeen.size >= threshold;
+  const verdict: Corroboration['verdict'] = basis !== 'none'
+    ? (refuted ? 'contested' : 'finding')
+    : (refuted ? 'refuted' : 'weak-signal');
+
   return {
     term,
     receiptIds,
@@ -165,7 +217,12 @@ export function corroborate(
     sources,
     tiers,
     basis,
-    verdict: basis === 'none' ? 'weak-signal' : 'finding',
+    refuting: {
+      records: refutingSeen.size,
+      channels: refutingChannels.size,
+      receiptIds: refutingIds,
+    },
+    verdict,
     threshold,
   };
 }
@@ -175,7 +232,9 @@ export function corroborate(
  *
  * Provided so a caller cannot forget the filter. `corroborate` returns the
  * verdict, but a renderer that iterates everything and prints it is one missing
- * `if` away from shipping a two record claim as a market pattern.
+ * `if` away from shipping a two record claim as a market pattern. A contested
+ * or refuted claim is excluded by the same equality: divided evidence is not
+ * a finding, whatever the supporting count alone would have said.
  */
 export function findingsOnly(claims: readonly Corroboration[]): Corroboration[] {
   return claims.filter((c) => c.verdict === 'finding');

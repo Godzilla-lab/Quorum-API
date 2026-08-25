@@ -70,6 +70,8 @@ function claimsRecorder() {
     asked.push({ category: outcome.category, terms: [...terms] });
     return {
       findings: terms.map((t) => ({ term: t, verdict: 'finding' })),
+      contested: [],
+      refuted: [],
       weakSignals: [],
       rejected: [],
       sufficiency: { verdict: 'sufficient' },
@@ -515,7 +517,7 @@ test('THE CLAIMS FUNCTION SEES WHAT THE RUN ACTUALLY DID, NOT JUST ITS CATEGORY'
     claimsFor: async (outcome) => {
       seen.push({ retrieval: outcome.retrieval, subjectResolved: outcome.subjectResolved });
       return {
-        findings: [], weakSignals: [], rejected: [],
+        findings: [], contested: [], refuted: [], weakSignals: [], rejected: [],
         sufficiency: null, receiptCheck: null, trends: [], voice: [], themes: [],
       };
     },

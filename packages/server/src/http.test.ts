@@ -42,7 +42,7 @@ async function live(over: { requireAuth?: boolean; keys?: string[]; withQueue?: 
       runReport: async (_request, _ctx: RunContext) => new Promise<RunOutcome>((resolve) => { release = resolve; }),
       claimsFor: async (_outcome, terms) => ({
         findings: terms.map((t) => ({ term: t, verdict: 'finding' })),
-        weakSignals: [], rejected: [],
+        contested: [], refuted: [], weakSignals: [], rejected: [],
         sufficiency: { verdict: 'sufficient' },
         receiptCheck: { cited: 0, resolved: 0, unresolved: [] },
         trends: [], voice: [], themes: [],

@@ -51,11 +51,11 @@ function wrap(text: string, width: number): string[] {
 }
 
 /*
- * The verdict is a binary and stays one: printable as a market statement, or
- * not. Zero records is on the not side, but calling it a weak signal reads as
- * "we found something faint" when we found nothing at all, so the empty case
- * gets a truer word here. The machine readable verdict is unchanged, which is
- * the point: this is wording, not a third state for a caller to handle.
+ * The printable line is still a binary: a market statement, or not. Contested
+ * and refuted sit firmly on the not side and say why. Zero records is on the
+ * not side too, but calling it a weak signal reads as "we found something
+ * faint" when we found nothing at all, so the empty case gets a truer word
+ * here. The machine readable verdict is unchanged by any of this wording.
  */
 /*
  * A number means something different in every source, so it is never printed
@@ -69,6 +69,17 @@ function scoreLabel(e: { score: number; scoreKind: ScoreKind }): string {
 }
 
 function label(claim: Corroboration): string {
+  /*
+   * Divided evidence says so in the label, with both counts, because the one
+   * thing worse than a weak signal is a strong signal presented as weaker
+   * than it is: "contested" carries more information than either side alone.
+   */
+  if (claim.verdict === 'contested') {
+    return `CONTESTED, ${claim.records} for / ${claim.refuting.records} against, no conclusion`;
+  }
+  if (claim.verdict === 'refuted') {
+    return `refuted by the record, ${claim.refuting.records} say otherwise`;
+  }
   if (claim.verdict !== 'finding') return claim.records === 0 ? 'no evidence' : 'weak signal';
   /* Which route earned it, so the report shows its working rather than
    * asserting a verdict a reader has to take on trust. */

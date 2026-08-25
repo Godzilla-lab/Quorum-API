@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Doc } from '@quorum/corpus';
-import { evidenceRowsFor, mentionsAllNegated } from './stance.ts';
+import { evidenceRowsFor, mentionsAllNegated, splitEvidenceRows } from './stance.ts';
 
 let n = 0;
 const doc = (text: string): Doc => ({
@@ -48,4 +48,31 @@ test('terms where negation is still evidence are untouched', () => {
 test('multi word complaint terms resolve by their complaint word', () => {
   const praise = doc('Two hundred miles in and no battery issues whatsoever.');
   assert.deepEqual(evidenceRowsFor('issues', [praise]), []);
+});
+
+/*
+ * The split, added 2026-08-25: the negated records used to be silently
+ * discarded, which threw the disagreement away. Now both sides come back and
+ * the caller counts them against each other.
+ */
+test('THE SPLIT RETURNS BOTH SIDES AND LOSES NOTHING', () => {
+  const rows = [
+    doc('the sole separated after two weeks, real problems'),
+    doc('had absolutely no problems with these, six months in'),
+    doc('no issues at all, no problems, would buy again'),
+  ];
+  const { supporting, refuting } = splitEvidenceRows('problems', rows);
+  assert.equal(supporting.length, 1);
+  assert.equal(refuting.length, 2);
+  assert.equal(supporting.length + refuting.length, rows.length, 'a partition, not a filter');
+  assert.deepEqual(evidenceRowsFor('problems', rows), supporting,
+    'the old entry point is the supporting half, unchanged for its callers');
+});
+
+test('a term outside the complaint set refutes nothing', () => {
+  const rows = [doc('the sizing runs small'), doc('sizing is not accurate at all')];
+  const { supporting, refuting } = splitEvidenceRows('sizing', rows);
+  assert.equal(supporting.length, 2);
+  assert.deepEqual(refuting, [],
+    'claim level polarity is not guessed at lexically, so nothing is counted against');
 });

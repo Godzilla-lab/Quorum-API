@@ -64,8 +64,12 @@ export interface ResolvedClaim {
    * `finding`     enough real corroboration to state
    * `weak-signal` real evidence, not enough of it
    * `rejected`    the claim quoted something nobody said
+   *
+   * The contested and refuted verdicts exist in the type because they exist
+   * on Corroboration, but this gate never supplies refuting rows, so today a
+   * synthesis claim can only carry the three above.
    */
-  verdict: 'finding' | 'weak-signal' | 'rejected';
+  verdict: Corroboration['verdict'] | 'rejected';
 }
 
 /*

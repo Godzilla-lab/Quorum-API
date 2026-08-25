@@ -122,6 +122,31 @@ test('A WEAK SIGNAL SAYS SO, AND SAYS NOT TO REPEAT IT', async () => {
   await corpus.close();
 });
 
+test('DIVIDED EVIDENCE PRINTS AS CONTESTED WITH BOTH COUNTS, NEVER AS A FINDING', async () => {
+  /* The evaluator's case: enough records report a problem AND enough say "no
+   * problems". Until 2026-08-25 the second group was silently discarded and
+   * this printed as a finding. */
+  const corpus = openSqliteCorpus({ path: join(scratch, `contested-${n}.db`) });
+  await corpus.addDocs([
+    doc('the sole fell apart, real problems with the stitching', 'r/running'),
+    doc('problems with the heel after a month', 'r/trailrunning'),
+    doc('durability problems, seam split on the toe box', 'r/runningshoegeeks'),
+    doc('six months in, absolutely no problems with these', 'r/running'),
+    doc('no problems at all, holding up great', 'r/sneakers'),
+    doc('zero problems, no issues, best pair I have owned', 'r/frugalrunning'),
+  ], 'running shoes');
+  const list = createTools({ corpus });
+  const search = list.find((t) => t.name === 'search_evidence')!;
+
+  const out = await search.run({ query: 'problems', category: 'running shoes' });
+  assert.match(out, /\*\*Contested\.\*\*/);
+  assert.match(out, /3 records support this and 3 say the opposite/);
+  assert.doesNotMatch(out, /\*\*Finding\.\*\*/);
+  assert.match(out, /Refuting receipts: `rc_[0-9a-f]+`/,
+    '"3 say otherwise" is a claim like any other and ships its receipts');
+  await corpus.close();
+});
+
 test('HOLDING NOTHING IS NOT EVIDENCE THAT NOTHING IS WRONG', async () => {
   const { call, corpus } = await tools();
   const out = await call('search_evidence', { query: 'battery explosions' });

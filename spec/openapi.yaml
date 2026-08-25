@@ -880,7 +880,7 @@ components:
         Stated rather than glossed: records carry no author, so three comments
         by one person count as three. The channel spread is reported so a reader
         can see how concentrated the evidence is.
-      required: [term, receiptIds, records, channels, sources, tiers, basis, verdict, threshold]
+      required: [term, receiptIds, records, channels, sources, tiers, basis, refuting, verdict, threshold]
       properties:
         term:
           type: string
@@ -923,12 +923,30 @@ components:
             is simply incorrect. The threshold of three was calibrated for forum
             comments and was never calibrated for filings.
           enum: [receipt-count, cross-tier, attested, none]
+        refuting:
+          type: object
+          description: |
+            The records that say the OPPOSITE, counted with the same dedupe
+            rule as the records that agree. Only records that affirmatively
+            negate a complaint shaped term qualify ("no problems", "zero
+            issues"); claim level polarity is not guessed at, so for other
+            terms this is empty, which means no detectable disagreement.
+          required: [records, channels, receiptIds]
+          properties:
+            records: { type: integer }
+            channels: { type: integer }
+            receiptIds:
+              type: array
+              items: { type: string }
         verdict:
           type: string
           description: |
             `finding` may be printed as a statement about the market.
-            `weak-signal` may not, ever, no matter how good the quotes are.
-          enum: [finding, weak-signal]
+            `contested` means both sides cleared the threshold: report both
+            counts, state no conclusion. `refuted` means only the
+            disagreement cleared it. None of the other three may ever be
+            printed as a finding, no matter how good the quotes are.
+          enum: [finding, contested, refuted, weak-signal]
         threshold:
           type: integer
           description: The threshold actually applied, so it can be checked.
@@ -1606,6 +1624,22 @@ components:
             with a flag, so a consumer cannot print a two record claim as a
             market pattern by forgetting a filter. That is one missing `if` away
             in every client that has ever been written against a flag.
+        contested:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }
+          description: |
+            Divided evidence: the threshold was met on BOTH sides. Each claim
+            carries both counts in `corroboration` and `corroboration.refuting`.
+            Report both numbers or report nothing; never present these as
+            findings. Separate array for the same reason findings have one: a
+            contested claim buried among weak signals reads as "not enough
+            evidence" when the truth is "plenty, and it disagrees".
+        refuted:
+          type: array
+          items: { $ref: '#/components/schemas/Claim' }
+          description: |
+            Only the disagreement cleared the threshold. The record, on
+            balance, says the opposite of the claim.
         weakSignals:
           type: array
           items: { $ref: '#/components/schemas/Claim' }

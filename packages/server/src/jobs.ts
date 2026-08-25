@@ -106,6 +106,11 @@ export interface RunOutcome {
 
 export interface ReportClaims {
   findings: unknown[];
+  /* Threshold met on BOTH sides: enough records agree and enough disagree.
+   * Both counts travel on each claim; the report states no conclusion. */
+  contested: unknown[];
+  /* Only the disagreement cleared the threshold. */
+  refuted: unknown[];
   weakSignals: unknown[];
   rejected: unknown[];
   sufficiency: unknown;

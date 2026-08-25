@@ -13,7 +13,7 @@
  */
 
 import {
-  assessSufficiency, corroborate, createCostMeter, discoverThemes, evidenceRowsFor,
+  assessSufficiency, corroborate, createCostMeter, discoverThemes, splitEvidenceRows,
   shareOfVoice, synthesiseAndResolve, trendFor, withEvidence,
   type AskModel, type ClaimWithEvidence, type RetrievalResult, type SynthesisReport, type Trend,
 } from '@quorum/core';
@@ -63,13 +63,14 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
   for (const term of terms) {
     const found: Doc[] = await corpus.search(term, { category, limit: EVIDENCE_PER_TERM });
     /* "had absolutely no problem" is praise, not a problems receipt. The
-     * stance filter drops records whose every mention of a complaint shaped
-     * term is negated. See stance.ts for why it names its terms. */
-    const rows = evidenceRowsFor(term, found);
+     * stance split sends records whose every mention of a complaint shaped
+     * term is negated to the REFUTING side, where they are counted against
+     * the claim instead of being silently discarded. See stance.ts. */
+    const { supporting: rows, refuting } = splitEvidenceRows(term, found);
     termRows.set(term, rows);
     /* The same rows that produced the count produce the sample, so a quote can
      * never come from a record that was not counted. */
-    claims.push(withEvidence(corroborate(term, rows), rows));
+    claims.push(withEvidence(corroborate(term, rows, { refuting }), rows));
   }
 
   /*
@@ -162,7 +163,12 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
    * missing `if` away in every client that has ever been written against a flag.
    */
   const findings = claims.filter((c) => c.verdict === 'finding');
-  const weakSignals = claims.filter((c) => c.verdict !== 'finding');
+  /* Divided evidence gets its own arrays for the same reason findings do: a
+   * contested claim buried among weak signals reads as "not enough evidence"
+   * when the truth is "plenty of evidence, and it disagrees". */
+  const contested = claims.filter((c) => c.verdict === 'contested');
+  const refuted = claims.filter((c) => c.verdict === 'refuted');
+  const weakSignals = claims.filter((c) => c.verdict === 'weak-signal');
 
   /*
    * EVERY RECEIPT THE REPORT PRINTS, fetched back before it is returned.
@@ -189,6 +195,8 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
 
   return {
     findings,
+    contested,
+    refuted,
     weakSignals,
     /* Only synthesis can produce a rejected claim, because rejection means a
      * model quoted something nobody said. Arithmetic over the corpus cannot. */

@@ -71,11 +71,14 @@ export interface SideTerm {
   corpusRecords: number;
   sharePct: number;
   /*
-   * `no-records` is a third state on purpose and is never collapsed into
+   * `no-records` is an extra state on purpose and is never collapsed into
    * `weak-signal`. One means we looked and found little, the other means this
-   * side's corpus says nothing at all about the term.
+   * side's corpus says nothing at all about the term. The corroboration
+   * verdicts pass through unchanged, contested and refuted included, because
+   * a side whose evidence disagrees with itself must not present either half
+   * as its answer.
    */
-  verdict: 'finding' | 'weak-signal' | 'no-records';
+  verdict: Corroboration['verdict'] | 'no-records';
   sampleReceiptIds: string[];
   /* True when this side's whole corpus is too thin to support a share. */
   thin: boolean;
