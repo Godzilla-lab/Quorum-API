@@ -1884,7 +1884,7 @@ components:
 
     EvidenceSearchResponse:
       type: object
-      required: [records, nextCursor]
+      required: [records, matchedAllWords, nextCursor]
       properties:
         records:
           type: array
@@ -1896,6 +1896,15 @@ components:
                   rank:
                     type: number
                     description: Relevance rank, for ordering only. Not a confidence.
+        matchedAllWords:
+          type: boolean
+          description: |
+            Search runs AND first and falls back to any word. True when every
+            returned record matched all the query words; false when the
+            fallback answered, in which case the rows measure vocabulary
+            coverage rather than the phrase, and counting them as
+            corroboration of the phrase overstates what was found. An empty
+            query result reports true vacuously.
         nextCursor: { type: [string, 'null'] }
 
     Monitor:

@@ -315,7 +315,10 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       const strict = toTsQueryStrict(query);
       const strictRows = strict ? await run(strict) : [];
       const rows = strictRows.length ? strictRows : await run(loose);
-      return rows.map((r) => ({ ...toDoc(r), rank: num(r.rank) }));
+      /* Same rule as the sqlite driver, and conformance asserts they agree:
+       * a one word query's loose pass IS the whole query. */
+      const matchedAll = strictRows.length > 0 || strict === null;
+      return rows.map((r) => ({ ...toDoc(r), rank: num(r.rank), matchedAll }));
     },
 
     /* The same shape as the sqlite driver, and conformance asserts they agree.

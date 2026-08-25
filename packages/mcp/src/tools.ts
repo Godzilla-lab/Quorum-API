@@ -148,6 +148,19 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       out.push('');
       out.push(corroborationLine(c, hits.length === COUNT_SCAN));
       out.push('');
+      /*
+       * THE FALLBACK CONFESSES. Search runs AND first and falls back to any
+       * word, and without this line a nonsense query ("pull request commit
+       * repository issue" against a shoe category) printed a finding on 143
+       * real records that merely contained "issue". Measured live 2026-08-25.
+       * The count is still true; what it counts has to be said.
+       */
+      if (hits.length && !hits[0]!.matchedAll) {
+        out.push('No stored record contains every word of this query together. The count above is '
+          + 'records matching ANY of the words, so it measures vocabulary coverage, not '
+          + 'corroboration of the phrase. Narrow the query to change that.');
+        out.push('');
+      }
       for (const doc of supporting.slice(0, QUOTED)) {
         out.push(quote(doc));
         out.push('');

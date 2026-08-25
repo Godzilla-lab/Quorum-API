@@ -607,6 +607,10 @@ export function createReceiptsServer(options: ServerOptions): Server {
           status: 200,
           body: {
             records: rows.map((r) => ({ ...toEvidence(r), rank: r.rank })),
+            /* Whether every record matched ALL the query words, or the
+             * any-word fallback answered. A caller counting these rows as
+             * corroboration needs to know which question the rows answer. */
+            matchedAllWords: rows.length ? rows[0]!.matchedAll : true,
             /* Always bounded. An unbounded response is a denial of service
              * vector aimed at ourselves. */
             nextCursor: null,

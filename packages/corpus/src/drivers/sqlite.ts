@@ -341,8 +341,11 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       const strict = toFts5QueryStrict(query);
       const strictRows = strict ? run(strict) : [];
       const rows = strictRows.length ? strictRows : run(loose);
+      /* A one word query has no fallback to fall into: strict is null and the
+       * loose pass IS the whole query, so every hit matched all of it. */
+      const matchedAll = strictRows.length > 0 || strict === null;
 
-      return rows.map((r) => ({ ...toDoc(r), rank: r.rank ?? 0 }));
+      return rows.map((r) => ({ ...toDoc(r), rank: r.rank ?? 0, matchedAll }));
     },
 
     /*

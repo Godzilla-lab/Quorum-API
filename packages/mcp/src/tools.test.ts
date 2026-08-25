@@ -122,6 +122,29 @@ test('A WEAK SIGNAL SAYS SO, AND SAYS NOT TO REPEAT IT', async () => {
   await corpus.close();
 });
 
+test('THE ANY-WORD FALLBACK CONFESSES INSTEAD OF POSING AS CORROBORATION', async () => {
+  /* Measured live 2026-08-25: "pull request commit repository issue" against
+   * a shoe category printed a finding on 143 real records that merely
+   * contained "issue". The count was true; what it counted was not said. */
+  const corpus = openSqliteCorpus({ path: join(scratch, `fallback-${n}.db`) });
+  await corpus.addDocs([
+    doc('the tongue slipping issue happens even with gusseted shoes', 'r/running'),
+    doc('lacing fixed my heel issue on long runs', 'r/trailrunning'),
+    doc('sizing issue on the wide fit, went up half', 'r/runningshoegeeks'),
+  ], 'running shoes');
+  const list = createTools({ corpus });
+  const search = list.find((t) => t.name === 'search_evidence')!;
+
+  const out = await search.run({ query: 'pull request commit repository issue', category: 'running shoes' });
+  assert.match(out, /No stored record contains every word of this query together/);
+  assert.match(out, /vocabulary coverage, not corroboration of the phrase/);
+
+  /* A query the records genuinely answer carries no such caveat. */
+  const clean = await search.run({ query: 'issue', category: 'running shoes' });
+  assert.doesNotMatch(clean, /vocabulary coverage/);
+  await corpus.close();
+});
+
 test('DIVIDED EVIDENCE PRINTS AS CONTESTED WITH BOTH COUNTS, NEVER AS A FINDING', async () => {
   /* The evaluator's case: enough records report a problem AND enough say "no
    * problems". Until 2026-08-25 the second group was silently discarded and

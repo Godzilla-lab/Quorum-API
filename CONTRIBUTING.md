@@ -29,6 +29,13 @@ fixtures, it is most of the way to mergeable.
   this is logged off public data, and a credential forfeits it. A pull that
   authenticates to a scraped source will be closed regardless of how good it is.
   Metered vendor APIs where we hold an account are a different category.
+- **A record must be somebody speaking, not a page somebody copied.** A scrape
+  dump pasted into a forum post or an issue tracker is not a voice, however
+  public its host, and harvesting it launders somebody else's scraping through
+  ours. Found live: an entire scraped race site inside a GitHub issue, stored
+  as running shoe evidence. The relevance gate's density rule enforces this;
+  an adapter for a source where dumps are common should filter the shape at
+  the adapter too, the way the GitHub adapter skips github.io repos.
 - **Return empty rather than throwing when unconfigured.** A missing key must
   degrade a run, never fail it. Someone with no keys at all should still get a
   report.

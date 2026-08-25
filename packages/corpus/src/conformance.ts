@@ -228,6 +228,7 @@ export function runConformanceSuite(
       const hits = await c.search('battery life', { category: 'running shoes' });
       assert.deepEqual(hits.map((h) => h.externalId), ['both'],
         'records with every word exist, so only they answer');
+      assert.ok(hits.every((h) => h.matchedAll), 'the strict pass answered, and the hits say so');
     });
   });
 
@@ -240,6 +241,13 @@ export function runConformanceSuite(
 
       const hits = await c.search('battery life', { category: 'running shoes' });
       assert.equal(hits.length, 2, 'recall is what a corroboration count needs when precision is unavailable');
+      /* The fallback must confess. A count over any-word matches presented as
+       * corroboration of the phrase is how a nonsense query printed a finding
+       * on 143 real records, measured live 2026-08-25. */
+      assert.ok(hits.every((h) => h.matchedAll === false), 'a fallback hit says it is one');
+
+      const oneWord = await c.search('battery', { category: 'running shoes' });
+      assert.ok(oneWord.every((h) => h.matchedAll), 'a one word query has no fallback to fall into');
     });
   });
 

@@ -79,6 +79,16 @@ export interface Doc {
 /* A search hit is a record plus its rank, which callers use for ordering only. */
 export interface DocHit extends Doc {
   rank: number;
+  /*
+   * Whether this hit matched EVERY word of the query, or arrived through the
+   * any-word fallback. Search runs AND first and falls back to OR, and until
+   * 2026-08-25 nothing downstream could tell which pass answered: a nonsense
+   * query like "pull request commit repository issue" against a shoe category
+   * counted every record containing "issue" and printed the count as if it
+   * corroborated the phrase. The flag is per hit but uniform across one
+   * result set, because the set comes wholly from one pass.
+   */
+  matchedAll: boolean;
 }
 
 /*
