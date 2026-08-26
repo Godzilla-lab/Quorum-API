@@ -33,7 +33,7 @@ import { meterFor, type Quotas } from './quotas.ts';
 import type { CorpusDriver, SourceId } from '@quorum/corpus';
 import { isReceiptId } from '@quorum/corpus';
 import { SOURCE_TIER, scoreKindOf, tierOf, type EvidenceTier } from '@quorum/corpus/tiers';
-import { resolveCitations, fabricationReport, type ModelClaim } from '@quorum/core';
+import { corroborate, resolveCitations, fabricationReport, splitEvidenceRows, type ModelClaim } from '@quorum/core';
 import type { JobQueue, ReportRequest, ReportSnapshot } from './jobs.ts';
 import { checkWebhookUrl, deriveSecret } from './webhooks.ts';
 import { createTools, handleMessage } from '@quorum/mcp';
@@ -133,6 +133,15 @@ export interface ServerOptions {
 /* 1MB. A verify request with 100 claims is a few kilobytes; anything near this
  * is a mistake or an attack, and either way it is refused before parsing. */
 const MAX_BODY = 1024 * 1024;
+
+/*
+ * How many matches the search corroboration count scans. FIXED, never caller
+ * supplied, for the reason the MCP surface learned on 2026-08-24: when the
+ * caller's limit fed the scan, the verdict flipped with a pagination knob.
+ * At exactly this many hits the counts are reported as truncated, because a
+ * scan that stops early can only undercount.
+ */
+const SEARCH_COUNT_SCAN = 500;
 
 /*
  * See `maxLagMs`. A single search blocks the loop for about 8.5ms, so a healthy
@@ -672,10 +681,20 @@ export function createReceiptsServer(options: ServerOptions): Server {
         if (from !== null && typeof from !== 'number') return error(400, 'invalid_request', from.message, ctx.requestId);
         const until = numberOrBad(body?.until, 'until');
         if (until !== null && typeof until !== 'number') return error(400, 'invalid_request', until.message, ctx.requestId);
+        const minChannels = numberOrBad((body as { minChannels?: unknown })?.minChannels, 'minChannels');
+        if (minChannels !== null && typeof minChannels !== 'number') return error(400, 'invalid_request', minChannels.message, ctx.requestId);
 
         const limit = Math.min(Number(body?.limit) || 50, 500);
+        /*
+         * The COUNT scans a FIXED window regardless of the caller's limit.
+         * The MCP surface learned this on 2026-08-24, measured live: when the
+         * caller's limit fed the scan, limit 2 printed "weak signal" and
+         * limit 3 printed "finding" on the identical corpus, a verdict
+         * flipped by a pagination knob. The caller chooses how much to READ,
+         * never how much gets COUNTED.
+         */
         const rows = await corpus.search(query, {
-          limit,
+          limit: SEARCH_COUNT_SCAN,
           ...(typeof body?.category === 'string' ? { category: body.category } : {}),
           ...(typeof single === 'string' ? { source: single as SourceId } : {}),
           ...(includeSources.length ? { sources: includeSources } : {}),
@@ -684,14 +703,47 @@ export function createReceiptsServer(options: ServerOptions): Server {
           ...(from !== null ? { from } : {}),
           ...(until !== null ? { until } : {}),
         });
+        /*
+         * One receipt, one row. Without a category filter the same utterance
+         * stored under two categories is two rows sharing one receipt id,
+         * which is storage layout, not evidence; the first (best ranked) row
+         * represents it. corroborate() dedupes internally, so this protects
+         * only `records[]` and the two counts staying in agreement.
+         */
+        const seenIds = new Set<string>();
+        const deduped = rows.filter((r) => {
+          if (seenIds.has(r.receiptId)) return false;
+          seenIds.add(r.receiptId);
+          return true;
+        });
+        const { supporting, refuting } = splitEvidenceRows(query, deduped);
+        const c = corroborate(query, supporting, {
+          refuting,
+          ...(minChannels !== null ? { minChannelsForFinding: minChannels } : {}),
+        });
         return {
           status: 200,
           body: {
-            records: rows.map((r) => ({ ...toEvidence(r), rank: r.rank })),
+            records: deduped.slice(0, limit).map((r) => ({ ...toEvidence(r), rank: r.rank })),
+            /*
+             * The counts as structure, so a machine consumer cannot mistake
+             * row volume for corroboration: `records[]` above is a page,
+             * `corroboration` is the verdict over the whole scanned window.
+             */
+            corroboration: {
+              records: c.records,
+              channels: c.channels,
+              threshold: c.threshold,
+              verdict: c.verdict,
+              basis: c.basis,
+              /* True when the scan window filled: the counts are floors. */
+              truncated: rows.length === SEARCH_COUNT_SCAN,
+            },
             /* Whether every record matched ALL the query words, or the
              * any-word fallback answered. A caller counting these rows as
              * corroboration needs to know which question the rows answer. */
             matchedAllWords: rows.length ? rows[0]!.matchedAll : true,
+            vocabularyOnly: rows.length ? !rows[0]!.matchedAll : false,
             /* Always bounded. An unbounded response is a denial of service
              * vector aimed at ourselves. */
             nextCursor: null,

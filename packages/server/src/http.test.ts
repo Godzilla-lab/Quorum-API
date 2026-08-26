@@ -796,3 +796,64 @@ test('minScore filters and the spec stops promising the cursor it never sent', a
     assert.equal(scored.body.nextCursor, null);
   } finally { await s.close(); }
 });
+
+test('one receipt is one row and one count, whatever the storage layout says', async () => {
+  const s = await live();
+  try {
+    /* The same utterance under two categories: two rows, one receipt id. */
+    await s.corpus.addDocs([
+      { source: 'reddit', kind: 'comment', externalId: 'dup-1', channel: 'r/gear', text: 'the strap snapped within a week of surfing', score: 3, url: 'https://e.test/d1', createdUtc: 5 },
+    ], 'surf straps');
+    await s.corpus.addDocs([
+      { source: 'reddit', kind: 'comment', externalId: 'dup-1', channel: 'r/gear', text: 'the strap snapped within a week of surfing', score: 3, url: 'https://e.test/d1', createdUtc: 5 },
+    ], 'leashes');
+
+    const r = await search(s.base, { query: 'strap snapped surfing' });
+    const ids = r.body.records.map((x: { receiptId: string }) => x.receiptId);
+    assert.equal(new Set(ids).size, ids.length, 'no receipt id appears twice in the page');
+    assert.equal(ids.length, 1);
+    assert.equal(r.body.corroboration.records, 1, 'and the count agrees with the page');
+  } finally { await s.close(); }
+});
+
+test('the verdict does not move when the page size does', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    const one = await search(s.base, { query: 'sizing', category: 'filter bench', limit: 1 });
+    const many = await search(s.base, { query: 'sizing', category: 'filter bench', limit: 100 });
+    assert.equal(one.body.records.length, 1, 'the page obeys the limit');
+    assert.deepEqual(one.body.corroboration, many.body.corroboration,
+      'the count scans a fixed window, so a pagination knob cannot flip a verdict');
+    assert.equal(one.body.corroboration.truncated, false);
+  } finally { await s.close(); }
+});
+
+test('minChannels demands more breadth and can only demote', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    const normal = await search(s.base, { query: 'sizing', category: 'filter bench' });
+    assert.equal(normal.body.corroboration.verdict, 'finding');
+    const strict = await search(s.base, { query: 'sizing', category: 'filter bench', minChannels: 40 });
+    assert.equal(strict.body.corroboration.verdict, 'weak-signal');
+    assert.equal(strict.body.corroboration.basis, normal.body.corroboration.basis,
+      'the basis survives demotion so the caller can see why it came close');
+  } finally { await s.close(); }
+});
+
+test('the fallback confession is machine readable', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    const phraseless = await search(s.base, { query: 'sizing weather balloon', category: 'filter bench' });
+    assert.equal(phraseless.body.matchedAllWords, false);
+    assert.equal(phraseless.body.vocabularyOnly, true);
+
+    const exact = await search(s.base, { query: 'sizing', category: 'filter bench' });
+    assert.equal(exact.body.vocabularyOnly, false);
+
+    const empty = await search(s.base, { query: 'zeppelin mooring', category: 'filter bench' });
+    assert.equal(empty.body.vocabularyOnly, false, 'an empty result confesses nothing because it counted nothing');
+  } finally { await s.close(); }
+});

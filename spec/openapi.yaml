@@ -1905,11 +1905,17 @@ components:
         until:
           type: [integer, 'null']
           description: Unix seconds, inclusive. See `from` for the window rules.
+        minChannels:
+          type: [integer, 'null']
+          description: |
+            Raises the distinct channel floor a finding verdict needs in this
+            response's corroboration block. The default is the product wide
+            floor; this cannot count anything twice, only demand more breadth.
         limit: { type: integer, minimum: 1, maximum: 500, default: 50 }
 
     EvidenceSearchResponse:
       type: object
-      required: [records, matchedAllWords, nextCursor]
+      required: [records, corroboration, matchedAllWords, vocabularyOnly, nextCursor]
       properties:
         records:
           type: array
@@ -1926,6 +1932,34 @@ components:
                       reports bm25 (lower is better) and the hosted postgres
                       engine reports normalised ts_rank (higher is better).
                       Only the order of one response means anything.
+        corroboration:
+          type: object
+          required: [records, channels, threshold, verdict, basis, truncated]
+          description: |
+            The verdict over the whole scanned window, computed by the same
+            arithmetic reports use. `records[]` above is a page; this block is
+            the count. A consumer reading only JSON gets the same honesty the
+            prose surfaces carry: when `vocabularyOnly` is true these counts
+            measure vocabulary coverage, not corroboration of the phrase.
+          properties:
+            records:
+              type: integer
+              description: Distinct records after receipt id and identical text dedupe.
+            channels:
+              type: integer
+              description: Distinct source and channel pairs behind the records.
+            threshold: { type: integer }
+            verdict:
+              type: string
+              enum: [finding, contested, refuted, weak-signal]
+            basis:
+              type: string
+              enum: [receipt-count, cross-tier, attested, none]
+            truncated:
+              type: boolean
+              description: |
+                True when the fixed 500 row scan window filled, in which case
+                every count in this block is a floor rather than a total.
         matchedAllWords:
           type: boolean
           description: |
@@ -1935,6 +1969,13 @@ components:
             coverage rather than the phrase, and counting them as
             corroboration of the phrase overstates what was found. An empty
             query result reports true vacuously.
+        vocabularyOnly:
+          type: boolean
+          description: |
+            The machine readable form of the fallback confession: true exactly
+            when the any word fallback answered, so the corroboration block
+            counts vocabulary coverage rather than the phrase. The inverse of
+            matchedAllWords except on an empty result, where it is false.
         nextCursor: { type: [string, 'null'] }
 
     Monitor:
