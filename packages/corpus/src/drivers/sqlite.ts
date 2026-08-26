@@ -17,7 +17,7 @@ import { dirname } from 'node:path';
 import type { CorpusDriver } from '../driver.ts';
 import { SQLITE_SCHEMA } from '../schema.ts';
 import { receiptId } from '../receipt-id.ts';
-import { toFts5Query, toFts5QueryStrict } from '../terms.ts';
+import { toFts5Phrase, toFts5Query, toFts5QueryStrict } from '../terms.ts';
 import { normaliseCategory, storableText } from '../text.ts';
 import { FUTURE_TOLERANCE_SECONDS, MIN_CREATED_UTC, WARM_MAX_AGE_DAYS, WARM_MIN_DOCS, ageInDays, isWarm } from '../constants.ts';
 import type {
@@ -285,10 +285,17 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
     async search(query: string, options: SearchOptions = {}): Promise<DocHit[]> {
       const {
         category = null, limit = 200, minScore = null, source = null,
-        sources = null, excludeSources = null, from, until,
+        sources = null, excludeSources = null, mode, from, until,
       } = options;
+      /*
+       * Phrase mode resolves its query BEFORE the loose guard, because a
+       * phrase keeps the short words the term extractor drops: "out of
+       * stock" has no three letter guarantee and is still a real phrase.
+       */
+      const phrase = mode === 'phrase' ? toFts5Phrase(query) : null;
+      if (mode === 'phrase' && !phrase) return [];
       const loose = ftsQuery(query);
-      if (!loose) return [];
+      if (!loose && !phrase) return [];
 
       const where = ['docs_fts MATCH ?'];
       const args: (string | number)[] = [];
@@ -349,9 +356,16 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
        * is untouched when they do not. Strict is null for one word queries,
        * where the two searches are identical.
        */
+      /* A phrase either occurs or it does not: one pass, no fallback, and
+       * matchedAll is true because there is no weaker pass to have fallen
+       * into. */
+      if (phrase) {
+        return run(phrase).map((r) => ({ ...toDoc(r), rank: r.rank ?? 0, matchedAll: true }));
+      }
+
       const strict = toFts5QueryStrict(query);
       const strictRows = strict ? run(strict) : [];
-      const rows = strictRows.length ? strictRows : run(loose);
+      const rows = strictRows.length ? strictRows : run(loose!);
       /* A one word query has no fallback to fall into: strict is null and the
        * loose pass IS the whole query, so every hit matched all of it. */
       const matchedAll = strictRows.length > 0 || strict === null;

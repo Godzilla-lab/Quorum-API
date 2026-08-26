@@ -384,3 +384,60 @@ test('extreme concentration carries a warning in search and in warmth', async ()
   assert.doesNotMatch(healthy, /Concentration warning/);
   await corpus.close();
 });
+
+/* ------------------------------------------------------------------ */
+/* phrase mode and filters on search_evidence, added 2026-08-26        */
+/* ------------------------------------------------------------------ */
+
+test('phrase mode matches the sequence and never confesses a fallback it cannot take', async () => {
+  const { call, corpus } = await tools();
+  const exact = await call('search_evidence', { query: 'runs small', category: 'running shoes', phrase: true });
+  assert.doesNotMatch(exact, /vocabulary coverage/, 'a phrase result is never an any word fallback');
+
+  const reordered = await call('search_evidence', { query: 'small runs', category: 'running shoes', phrase: true });
+  assert.match(reordered, /No records held/, 'the words out of order are not the phrase');
+  await corpus.close();
+});
+
+test('source filters work and a typo is a refusal naming the mistake', async () => {
+  const { call, corpus } = await tools();
+  await corpus.addDocs([
+    doc('sizing gripes in a filing about running shoes', 'Filer, Inc.'),
+  ].map((d) => ({ ...d, source: 'sec-edgar' as const })), 'running shoes');
+
+  const without = await call('search_evidence', { query: 'sizing', category: 'running shoes', excludeSources: ['sec-edgar', 'cpsc'] });
+  assert.doesNotMatch(without, /sec-edgar/, 'the excluded source is gone from quotes and ids');
+
+  const voice = await call('search_evidence', { query: 'sizing', category: 'running shoes', sourceClasses: ['consumer_voice'] });
+  assert.doesNotMatch(voice, /sec-edgar/);
+
+  const typo = await call('search_evidence', { query: 'sizing', excludeSources: ['sec-edgear'] });
+  assert.match(typo, /sec-edgear/, 'the refusal names the typo');
+  assert.match(typo, /sec-edgar/, 'and points at the source they meant');
+
+  const badClass = await call('search_evidence', { query: 'sizing', sourceClasses: ['regulatory'] });
+  assert.match(badClass, /consumer_voice, practitioner and institutional/);
+  await corpus.close();
+});
+
+test('date filters take ISO dates and refuse garbage with copy, not a throw', async () => {
+  const { call, corpus } = await tools();
+  const windowed = await call('search_evidence', { query: 'sizing', category: 'running shoes', after: '2020-01-01' });
+  assert.match(windowed, /Finding|records/, 'the fixture docs are dated 2023 era and stay inside');
+
+  const excluded = await call('search_evidence', { query: 'sizing', category: 'running shoes', after: '2030-01-01' });
+  assert.match(excluded, /No records held/);
+
+  const garbage = await call('search_evidence', { query: 'sizing', after: 'last march' });
+  assert.match(garbage, /ISO date/, 'garbage gets a sentence, not an exception');
+  await corpus.close();
+});
+
+test('minChannels on search_evidence demands breadth and can only demote', async () => {
+  const { call, corpus } = await tools();
+  const normal = await call('search_evidence', { query: 'sizing', category: 'running shoes' });
+  assert.match(normal, /\*\*Finding\.\*\*/);
+  const strict = await call('search_evidence', { query: 'sizing', category: 'running shoes', minChannels: 40 });
+  assert.match(strict, /\*\*Weak signal, not a finding\.\*\*/);
+  await corpus.close();
+});

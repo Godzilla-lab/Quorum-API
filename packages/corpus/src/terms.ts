@@ -94,3 +94,27 @@ export function toTsQueryStrict(raw: string): string | null {
   if (terms.length < 2) return null;
   return terms.join(' & ');
 }
+
+/*
+ * The FTS5 phrase form: every word, in order, inside one quoted phrase. A
+ * phrase either occurs or it does not, so short words are KEPT here rather
+ * than dropped: "out of stock" quoted without its "of" is a different phrase.
+ * The postgres side needs no builder because the driver hands the raw text to
+ * phraseto_tsquery, whose own parser cannot be broken by punctuation. The two
+ * engines differ on stop words by construction: FTS5's porter tokenizer
+ * indexes every word, while the english tsquery config drops stop words and
+ * keeps positions, so a phrase made only of stop words matches nothing on one
+ * and everything-adjacent on the other. Conformance pins the behaviour both
+ * drivers share; the spec says not to build phrases out of stop words.
+ */
+export function toFts5Phrase(raw: string): string | null {
+  const words = String(raw)
+    .toLowerCase()
+    .replace(/["^*():&|!<>~'\\-]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+  if (!words.length) return null;
+  return `"${words.join(' ')}"`;
+}

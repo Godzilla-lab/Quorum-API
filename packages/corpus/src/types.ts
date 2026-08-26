@@ -377,6 +377,13 @@ export interface SearchOptions extends DateWindow {
    */
   sources?: readonly SourceId[] | null;
   excludeSources?: readonly SourceId[] | null;
+  /*
+   * 'phrase' searches for the words as one ordered phrase, with no any-word
+   * fallback: a phrase either occurs or it does not, and hits report
+   * matchedAll true because there is no weaker pass to have fallen into.
+   * Absent means the default ladder, AND first then OR.
+   */
+  mode?: 'phrase';
 }
 
 /*

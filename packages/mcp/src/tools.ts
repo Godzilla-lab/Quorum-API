@@ -18,7 +18,8 @@
 
 import { corroborate, formatVerdict, adsForVerdict, splitEvidenceRows, type Corroboration } from '@quorum/core';
 import { MIN_CHANNELS_FOR_FINDING } from '@quorum/corpus/constants';
-import type { CorpusDriver, Doc } from '@quorum/corpus';
+import { SOURCE_TIER } from '@quorum/corpus/tiers';
+import type { CorpusDriver, Doc, SourceId } from '@quorum/corpus';
 import type { ToolDefinition } from './protocol.ts';
 
 /* How many records a tool will quote. Small on purpose: the counts are the
@@ -138,6 +139,25 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       properties: {
         query: { type: 'string', description: 'What to look for: "sizing", "battery life", "runs small".' },
         category: { type: 'string', description: 'Optional. Narrow to one product category.' },
+        phrase: {
+          type: 'boolean',
+          description: 'Optional. Match the words as one ordered phrase, no any word fallback. Build phrases from content words.',
+        },
+        sources: {
+          type: 'array', items: { type: 'string' },
+          description: 'Optional. Only these sources (reddit, appstore, sec-edgar...).',
+        },
+        excludeSources: {
+          type: 'array', items: { type: 'string' },
+          description: 'Optional. Drop these sources, e.g. ["sec-edgar", "cpsc"] to drop the institutional records from a consumer question.',
+        },
+        sourceClasses: {
+          type: 'array', items: { type: 'string', enum: ['consumer_voice', 'practitioner', 'institutional'] },
+          description: 'Optional. Filter by what kind of speaker: consumer_voice (reddit, reviews...), practitioner (github...), institutional (regulators, filings).',
+        },
+        after: { type: 'string', description: 'Optional. ISO date (2026-01-31): only records their authors wrote on or after it. Undated records sit inside no window.' },
+        before: { type: 'string', description: 'Optional. ISO date: only records written on or before it.' },
+        minChannels: { type: 'number', description: 'Optional. Demand at least this many distinct channels for a finding verdict. Can only demote.' },
       },
       required: ['query'],
     },
@@ -146,11 +166,74 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       if (!query) return 'No query given. Pass something to search for.';
       const category = str(args['category']);
 
+      /*
+       * Filters refuse loudly rather than silently returning empty: a typo
+       * answered with "no records" is indistinguishable from a clean bill,
+       * which is the exact ambiguity this tool exists to avoid.
+       */
+      const readSources = (key: string): SourceId[] | string => {
+        const value = args[key];
+        if (value == null) return [];
+        if (!Array.isArray(value) || value.some((s) => typeof s !== 'string')) {
+          return `${key} must be an array of source names.`;
+        }
+        const unknown = (value as string[]).find((s) => !(s in SOURCE_TIER));
+        if (unknown !== undefined) {
+          const known = Object.keys(SOURCE_TIER);
+          const close = known.filter((k) => k.includes(unknown.slice(0, 4)) || unknown.includes(k.slice(0, 4)));
+          return `${key} names a source this corpus cannot hold: ${JSON.stringify(unknown)}.`
+            + (close.length ? ` Closest known: ${close.join(', ')}.` : ` Known sources include: ${known.slice(0, 8).join(', ')}...`);
+        }
+        return value as SourceId[];
+      };
+      const sources = readSources('sources');
+      if (typeof sources === 'string') return sources;
+      const excludeSources = readSources('excludeSources');
+      if (typeof excludeSources === 'string') return excludeSources;
+
+      const CLASS_TIER: Record<string, 'A' | 'B' | 'C'> = { consumer_voice: 'C', practitioner: 'B', institutional: 'A' };
+      let classSources: SourceId[] = [];
+      if (args['sourceClasses'] != null) {
+        const classes = args['sourceClasses'];
+        if (!Array.isArray(classes) || classes.some((c) => typeof c !== 'string')) {
+          return 'sourceClasses must be an array of class names.';
+        }
+        const bad = (classes as string[]).find((c) => !(c in CLASS_TIER));
+        if (bad !== undefined) {
+          return `sourceClasses names an unknown class ${JSON.stringify(bad)}. The classes are consumer_voice, practitioner and institutional.`;
+        }
+        const wanted = new Set((classes as string[]).map((c) => CLASS_TIER[c]!));
+        classSources = (Object.keys(SOURCE_TIER) as SourceId[]).filter((s) => wanted.has(SOURCE_TIER[s] as 'A' | 'B' | 'C'));
+      }
+      const includeSources = [...new Set([...sources, ...classSources])];
+
+      const readDate = (key: string): number | null | string => {
+        const value = args[key];
+        if (value == null) return null;
+        const parsed = typeof value === 'string' ? Date.parse(value) : NaN;
+        if (!Number.isFinite(parsed)) {
+          return `${key} must be an ISO date like 2026-01-31; got ${JSON.stringify(value)}.`;
+        }
+        return Math.floor(parsed / 1000);
+      };
+      const after = readDate('after');
+      if (typeof after === 'string') return after;
+      const before = readDate('before');
+      if (typeof before === 'string') return before;
+      const minChannels = typeof args['minChannels'] === 'number' && Number.isFinite(args['minChannels'])
+        ? args['minChannels'] : null;
+      const phrase = args['phrase'] === true;
+
       /* A caller sending the retired `limit` parameter is ignored, not
        * errored: it must not be able to change the answer either way. */
       const hits = await corpus.search(query, {
         limit: COUNT_SCAN,
         ...(category ? { category } : {}),
+        ...(includeSources.length ? { sources: includeSources } : {}),
+        ...(Array.isArray(excludeSources) && excludeSources.length ? { excludeSources } : {}),
+        ...(after !== null ? { from: after } : {}),
+        ...(before !== null ? { until: before } : {}),
+        ...(phrase ? { mode: 'phrase' as const } : {}),
       });
 
       if (!hits.length) {
@@ -167,7 +250,10 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       /* The same stance split every report applies: a record saying "no
        * problems" counts AGAINST a problems query, never for it. */
       const { supporting, refuting } = splitEvidenceRows(query, hits);
-      const c = corroborate(query, supporting, { refuting });
+      const c = corroborate(query, supporting, {
+        refuting,
+        ...(minChannels !== null ? { minChannelsForFinding: minChannels } : {}),
+      });
       const out: string[] = [];
       out.push(`## ${query}${category ? ` in ${category}` : ''}`);
       out.push('');

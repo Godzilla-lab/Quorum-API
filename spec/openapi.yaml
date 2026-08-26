@@ -1905,6 +1905,17 @@ components:
         until:
           type: [integer, 'null']
           description: Unix seconds, inclusive. See `from` for the window rules.
+        mode:
+          type: [string, 'null']
+          enum: [phrase, null]
+          description: |
+            "phrase" searches for the words as one ordered phrase with no any
+            word fallback: a phrase either occurs or it does not, so
+            matchedAllWords is always true on a phrase result. Build phrases
+            from content words; the hosted engine's stop word list drops words
+            like "of" from a phrase while the sqlite engine keeps them. Absent
+            means the default ladder, every word first, any word as the
+            confessed fallback.
         minChannels:
           type: [integer, 'null']
           description: |

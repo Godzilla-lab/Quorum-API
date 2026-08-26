@@ -315,6 +315,29 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * Phrase mode: the words, in order, as one phrase, with no any-word
+   * fallback. Fixture words are content words on purpose: the two engines
+   * disagree about stop words (porter indexes them, the english tsquery
+   * config drops them), and conformance pins the behaviour they share.
+   */
+  test(`${driverName}: phrase mode matches the exact sequence and never falls back`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'exact', text: 'honestly the battery life is short on these' }),
+        doc({ externalId: 'scattered', text: 'battery packs gave my life some grief this winter' }),
+      ], 'running shoes');
+
+      const hits = await c.search('battery life', { mode: 'phrase' });
+      assert.deepEqual(hits.map((h) => h.externalId), ['exact'],
+        'the words out of order or apart are not the phrase');
+      assert.ok(hits.every((h) => h.matchedAll), 'a phrase hit matched everything it was asked for');
+
+      const reordered = await c.search('life battery', { mode: 'phrase' });
+      assert.deepEqual(reordered, [], 'phrase order is the query, so reversing it finds nothing');
+    });
+  });
+
   test(`${driverName}: a query of only short words returns nothing rather than everything`, async () => {
     await withCorpus(async (c) => {
       await c.addDocs([doc({ externalId: '1' })], 'running shoes');

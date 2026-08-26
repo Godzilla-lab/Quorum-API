@@ -683,6 +683,10 @@ export function createReceiptsServer(options: ServerOptions): Server {
         if (until !== null && typeof until !== 'number') return error(400, 'invalid_request', until.message, ctx.requestId);
         const minChannels = numberOrBad((body as { minChannels?: unknown })?.minChannels, 'minChannels');
         if (minChannels !== null && typeof minChannels !== 'number') return error(400, 'invalid_request', minChannels.message, ctx.requestId);
+        const mode = (body as { mode?: unknown })?.mode;
+        if (mode != null && mode !== 'phrase') {
+          return error(400, 'invalid_request', 'mode must be "phrase" or absent; the default is the AND first, any word fallback ladder', ctx.requestId);
+        }
 
         const limit = Math.min(Number(body?.limit) || 50, 500);
         /*
@@ -702,6 +706,7 @@ export function createReceiptsServer(options: ServerOptions): Server {
           ...(minScore !== null ? { minScore } : {}),
           ...(from !== null ? { from } : {}),
           ...(until !== null ? { until } : {}),
+          ...(mode === 'phrase' ? { mode } : {}),
         });
         /*
          * One receipt, one row. Without a category filter the same utterance

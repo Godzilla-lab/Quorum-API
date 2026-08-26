@@ -280,12 +280,21 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
     async search(query: string, options: SearchOptions = {}): Promise<DocHit[]> {
       const {
         category = null, limit = 200, minScore = null, source = null,
-        sources = null, excludeSources = null, from, until,
+        sources = null, excludeSources = null, mode, from, until,
       } = options;
-      const loose = toTsQuery(query);
+      /*
+       * Phrase mode hands the RAW text to phraseto_tsquery, whose own parser
+       * cannot be broken by punctuation, and which keeps word positions so
+       * the words must occur in order. Caveat shared with terms.ts: the
+       * english config drops stop words, FTS5's porter tokenizer does not,
+       * so phrases should be made of content words.
+       */
+      const isPhrase = mode === 'phrase';
+      const queryFn = isPhrase ? 'phraseto_tsquery' : 'to_tsquery';
+      const loose = isPhrase ? query : toTsQuery(query);
       if (!loose) return [];
 
-      const where = ['d.text_tsv @@ to_tsquery(\'english\', $1)'];
+      const where = [`d.text_tsv @@ ${queryFn}('english', $1)`];
       const params: unknown[] = [loose];
       if (category) { params.push(normaliseCategory(category)); where.push(`d.category = $${params.length}`); }
       if (source) { params.push(source); where.push(`d.source = $${params.length}`); }
@@ -325,13 +334,20 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       const text =
         `SELECT d.receipt_id, d.source, d.kind, d.external_id, d.category, d.channel,
                 d.text, d.score, d.url, d.created_utc, d.harvested_at,
-                ts_rank(d.text_tsv, to_tsquery('english', $1), 1) AS rank
+                ts_rank(d.text_tsv, ${queryFn}('english', $1), 1) AS rank
          FROM docs d
          WHERE ${where.join(' AND ')}
          ORDER BY rank DESC, d.score DESC
          LIMIT $${params.length}`;
       const run = (tsquery: string): Promise<DocRow[]> =>
         sql.query<DocRow>(text, [tsquery, ...params.slice(1)]);
+
+      /* A phrase either occurs or it does not: one pass, no fallback, and
+       * matchedAll is true because there is no weaker pass to have fallen
+       * into. Same rule as the sqlite driver, conformance asserted. */
+      if (isPhrase) {
+        return (await run(loose)).map((r) => ({ ...toDoc(r), rank: num(r.rank), matchedAll: true }));
+      }
 
       /* AND first, OR as the fallback, same ladder as the sqlite driver and
        * for the reason given in terms.ts. */

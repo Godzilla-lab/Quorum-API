@@ -857,3 +857,20 @@ test('the fallback confession is machine readable', async () => {
     assert.equal(empty.body.vocabularyOnly, false, 'an empty result confesses nothing because it counted nothing');
   } finally { await s.close(); }
 });
+
+test('phrase mode over HTTP: exact sequence only, bad mode is a 400', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    const exact = await search(s.base, { query: 'runs small', category: 'filter bench', mode: 'phrase' });
+    assert.ok(exact.body.records.length > 0);
+    assert.equal(exact.body.matchedAllWords, true);
+    assert.equal(exact.body.vocabularyOnly, false);
+
+    const reordered = await search(s.base, { query: 'small runs', category: 'filter bench', mode: 'phrase' });
+    assert.equal(reordered.body.records.length, 0);
+
+    const bad = await search(s.base, { query: 'runs small', mode: 'semantic' });
+    assert.equal(bad.status, 400);
+  } finally { await s.close(); }
+});

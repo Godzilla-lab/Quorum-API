@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractTerms, toFts5Query, toTsQuery } from './terms.ts';
+import { extractTerms, toFts5Phrase, toFts5Query, toTsQuery } from './terms.ts';
 
 /*
  * The cutoff is length >= 3, ported unchanged from the engine's `w.length > 2`.
@@ -82,4 +82,15 @@ test('no control character survives into a term', () => {
     assert.deepEqual(extractTerms(`sizing${ch}durability`), ['sizing', 'durability'], `U+${code.toString(16)}`);
   }
   assert.deepEqual(extractTerms(`sizing${String.fromCharCode(0x7f)}durability`), ['sizing', 'durability']);
+});
+
+test('the phrase builder keeps short words and survives punctuation', () => {
+  /* "out of stock" quoted without its "of" is a different phrase, so the
+   * phrase form keeps the short words the term extractor drops. */
+  assert.equal(toFts5Phrase('out of stock'), '"out of stock"');
+  assert.equal(toFts5Phrase('  Sold   OUT!  '), '"sold out"',
+    'whitespace collapses, case folds, and operator characters are stripped');
+  assert.equal(toFts5Phrase('runs "small" (really)'), '"runs small really"');
+  assert.equal(toFts5Phrase('   '), null);
+  assert.equal(toFts5Phrase('"()"'), null);
 });
