@@ -251,6 +251,42 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * Ranking is not a length contest. Measured live 2026-08-26 by an outside
+   * evaluation: on the hosted driver a long project update ranked top five
+   * for three unrelated queries and two SEC filings outranked every real
+   * customer, because ts_rank was called with no normalisation argument and
+   * so never penalised length, while sqlite's bm25 did. This test is the
+   * cross driver ordering guarantee an earlier comment claimed conformance
+   * provided; nothing asserted it until now.
+   */
+  test(`${driverName}: the concise on topic record outranks the long rambler sharing its words`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'concise', text: 'the battery life on these is dreadful, four hours at best' }),
+        doc({
+          externalId: 'rambler',
+          text: 'Quarterly progress notes for the workshop, longer than usual because a lot happened. '
+            + 'The new enclosure design finally cleared thermal testing, the battery supplier changed '
+            + 'their packaging so the intake jig needed rework, and the firmware team spent most of the '
+            + 'month chasing a sleep mode regression that drained the battery overnight on some units. '
+            + 'Community life continues as always: the forum meetup photos are posted, the classifieds '
+            + 'thread got a cleanup, and the wiki migration is half done. Shipping wise the third batch '
+            + 'left the warehouse on Tuesday and the fourth is being packed now, with customs forms '
+            + 'pre-filled this time after the last delay. Real life kept several contributors busy this '
+            + 'quarter so the documentation sprint moved to next month, and the test rig got a second '
+            + 'power channel so endurance runs no longer block the bench. More notes when the next '
+            + 'batch lands, and thanks as ever to everyone who filed reports.',
+        }),
+      ], 'running shoes');
+
+      const hits = await c.search('battery life', { category: 'running shoes' });
+      assert.equal(hits.length, 2, 'both records carry both words, so both answer the strict pass');
+      assert.equal(hits[0]?.externalId, 'concise',
+        'the record that is about the query must outrank the record that merely contains it');
+    });
+  });
+
   test(`${driverName}: a query of only short words returns nothing rather than everything`, async () => {
     await withCorpus(async (c) => {
       await c.addDocs([doc({ externalId: '1' })], 'running shoes');

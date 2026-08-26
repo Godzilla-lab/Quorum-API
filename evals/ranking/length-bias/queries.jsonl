@@ -1,0 +1,7 @@
+{"query": "sold out", "better": "short-stock", "worse": "filing", "why": "a buyer saying sold out beats a prospectus that mentions it among twenty risk factors"}
+{"query": "out of stock", "better": "short-stock", "worse": "omnibus", "why": "the on topic comment beats the long project update that mentions stock once"}
+{"query": "out of stock", "better": "short-stock", "worse": "filing", "why": "the live failure this set exists for: an S-1 outranked every real customer"}
+{"query": "gift wrapping", "better": "short-gift", "worse": "omnibus", "why": "both carry both words; the record about gift wrapping must beat the record that brushes past it"}
+{"query": "exchange return", "better": "short-return", "worse": "omnibus", "why": "a first person return story beats a paragraph that mentions a return window in passing"}
+{"query": "refused refund", "better": "short-service", "worse": "filing", "why": "a customer refused a refund beats boilerplate about refund obligations"}
+{"query": "runs small", "better": "short-return", "worse": "omnibus", "why": "the sizing complaint beats a long post where runs and small appear incidentally"}
