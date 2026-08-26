@@ -71,7 +71,7 @@ function result(over: Partial<RunResult> = {}): RunResult {
     comparison: null,
     synthesis: null,
     warmth: {
-      category: 'running shoes', docs: 340, comments: 320, channels: 11,
+      category: 'running shoes', docs: 340, comments: 320, channels: 11, ads: 0,
       lastHarvested: 1_700_000_100, ageDays: 0.2, warm: true, subreddits: ['running'], queries: ['quality'],
     },
     claims: [

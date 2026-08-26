@@ -45,7 +45,7 @@ function result(over: Partial<RunResult> = {}): RunResult {
     adRetrieval: null,
     formats: null,
     durationBasis: { reported: 0, startDate: 0, observationSpan: 0, none: 0 },
-    warmth: { category: 'running shoes', docs: 12, comments: 10, channels: 3, warm: false, ageDays: 1, lastHarvested: 1_700_000_100, subreddits: [], queries: [] },
+    warmth: { category: 'running shoes', docs: 12, comments: 10, channels: 3, ads: 0, warm: false, ageDays: 1, lastHarvested: 1_700_000_100, subreddits: [], queries: [] },
     claims: [claim('sizing', [doc('rc_a', 'runs small'), doc('rc_b', 'sized up', 'r/b'), doc('rc_c', 'too tight', 'r/c')])],
     attested: null,
     gaps: [],

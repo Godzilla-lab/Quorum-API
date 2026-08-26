@@ -457,6 +457,13 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
         'SELECT subreddits, queries FROM categories WHERE name = $1',
         [category],
       );
+      /* Distinct ads, not observations: a second sighting of one ad is
+       * duration evidence, never a second ad. Same rule as the sqlite driver
+       * and conformance asserts they agree. */
+      const [adAgg] = await sql.query<{ ads: unknown }>(
+        'SELECT COUNT(DISTINCT ad_id) AS ads FROM ad_observations WHERE category = $1',
+        [category],
+      );
 
       const docs = num(agg?.docs);
       const lastHarvested = num(agg?.last_harvested);
@@ -467,6 +474,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
         docs,
         comments: num(agg?.comments),
         channels: num(agg?.channels),
+        ads: num(adAgg?.ads),
         lastHarvested,
         ageDays: age,
         warm: isWarm(docs, age),
@@ -488,6 +496,13 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
          ORDER BY docs DESC, category ASC`,
         [],
       );
+      /* One aggregate for every category rather than a query per row, same
+       * shape as the sqlite driver. */
+      const adRows = await sql.query<{ category: string; ads: unknown }>(
+        'SELECT category, COUNT(DISTINCT ad_id) AS ads FROM ad_observations GROUP BY category',
+        [],
+      );
+      const adsByCategory = new Map(adRows.map((r) => [r.category, num(r.ads)]));
       const now = nowSeconds();
       return rows.map((r) => {
         const docs = num(r.docs);
@@ -497,6 +512,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
           category: r.category,
           docs,
           channels: num(r.channels),
+          ads: adsByCategory.get(r.category) ?? 0,
           lastHarvested,
           ageDays: age,
           warm: isWarm(docs, age),

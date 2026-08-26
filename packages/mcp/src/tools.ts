@@ -404,7 +404,9 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
         const out: string[] = ['## Categories held', ''];
         for (const c of all.slice(0, LISTED_CATEGORIES)) {
           const age = c.ageDays === null ? 'never harvested' : `${c.ageDays.toFixed(1)} days old`;
-          out.push(`- ${c.category}: ${c.docs} records, ${c.channels} channels, ${age}, ${c.warm ? 'warm' : 'cold'}`);
+          /* Ads are listed beside records so a caller can see which
+           * categories can answer compare_formats without probing each one. */
+          out.push(`- ${c.category}: ${c.docs} records, ${c.channels} channels, ${c.ads} ads, ${age}, ${c.warm ? 'warm' : 'cold'}`);
         }
         if (all.length > LISTED_CATEGORIES) out.push(`...and ${all.length - LISTED_CATEGORIES} more.`);
         return out.join('\n');
@@ -421,10 +423,11 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       const age = stats.ageDays === null ? 'unknown age' : `last harvested ${stats.ageDays.toFixed(1)} days ago`;
       /* Ads are their own leg and warmth never implied them: a warm category
        * with no ads still answers compare_formats with nothing. Said here so
-       * a caller learns it before spending a call finding out. */
-      const ads = await corpus.latestAdsByCategory(category, 500);
-      const adsLine = ads.length
-        ? `${ads.length} distinct ads held, so compare_formats has material here.`
+       * a caller learns it before spending a call finding out. The count is
+       * the driver's aggregate, so it is exact; the earlier latestAds probe
+       * silently capped at 500 and disclosed nothing. */
+      const adsLine = stats.ads
+        ? `${stats.ads} distinct ads held, so compare_formats has material here.`
         : 'No ads held: records cover conversation only, and compare_formats has nothing to compare yet.';
       const concentrated = concentrationWarning(stats.docs, stats.channels);
       return `## ${category}\n\n`

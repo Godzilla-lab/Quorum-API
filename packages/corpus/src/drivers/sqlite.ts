@@ -491,6 +491,12 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       const meta = db.prepare('SELECT subreddits, queries FROM categories WHERE name = ?')
         .get(category) as unknown as { subreddits: string | null; queries: string | null } | undefined;
 
+      /* Distinct ads, not observations: observing one ad twice is duration
+       * evidence, never a second ad. Counted here so warmth can report ad
+       * coverage without a second capped query per category. */
+      const adRow = db.prepare('SELECT COUNT(DISTINCT ad_id) AS ads FROM ad_observations WHERE category = ?')
+        .get(category) as unknown as { ads: number | null } | undefined;
+
       const docs = row?.docs ?? 0;
       const lastHarvested = row?.last_harvested ?? 0;
       const age = ageInDays(lastHarvested, nowSeconds());
@@ -508,6 +514,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
         docs,
         comments: row?.comments ?? 0,
         channels: row?.channels ?? 0,
+        ads: adRow?.ads ?? 0,
         lastHarvested,
         ageDays: age,
         warm: isWarm(docs, age),
@@ -529,6 +536,14 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
         category: string; docs: number; channels: number; last_harvested: number | null;
       }[];
 
+      /* One aggregate for every category rather than a query per row. A
+       * category with ads but no records does not appear in the listing;
+       * the docs table is the discovery surface and ads follow it. */
+      const adRows = db.prepare(
+        'SELECT category, COUNT(DISTINCT ad_id) AS ads FROM ad_observations GROUP BY category',
+      ).all() as unknown as { category: string; ads: number }[];
+      const adsByCategory = new Map(adRows.map((r) => [r.category, Number(r.ads)]));
+
       const now = nowSeconds();
       return rows.map((r) => {
         const lastHarvested = r.last_harvested ?? 0;
@@ -537,6 +552,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
           category: r.category,
           docs: Number(r.docs),
           channels: Number(r.channels),
+          ads: adsByCategory.get(r.category) ?? 0,
           lastHarvested,
           ageDays: age,
           warm: isWarm(Number(r.docs), age),

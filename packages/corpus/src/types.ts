@@ -154,6 +154,10 @@ export interface CategoryStats {
   docs: number;
   comments: number;
   channels: number;
+  /* Distinct ads observed for the category. Ads are their own leg: a warm
+   * record corpus with zero ads still answers compare_formats with nothing,
+   * and until 2026-08-26 nothing but a per category probe could say which. */
+  ads: number;
   lastHarvested: number;
   ageDays: number | null;
   warm: boolean;
@@ -172,6 +176,8 @@ export interface CategoryListing {
   category: string;
   docs: number;
   channels: number;
+  /* Distinct ads observed. See CategoryStats.ads. */
+  ads: number;
   lastHarvested: number;
   ageDays: number | null;
   warm: boolean;

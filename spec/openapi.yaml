@@ -1226,11 +1226,18 @@ components:
 
     CategoryListing:
       type: object
-      required: [category, docs, channels, lastHarvested, ageDays, warm]
+      required: [category, docs, channels, ads, lastHarvested, ageDays, warm]
       properties:
         category: { type: string }
         docs: { type: integer }
         channels: { type: integer }
+        ads:
+          type: integer
+          description: |
+            Distinct ads observed for the category. Ads are their own leg: a
+            warm record corpus with zero ads still has nothing for a format
+            comparison, and this number is how a caller finds out without
+            probing category by category.
         lastHarvested:
           type: integer
           description: Unix seconds of the newest harvest.
@@ -1242,12 +1249,15 @@ components:
 
     CategoryStats:
       type: object
-      required: [category, docs, comments, channels, lastHarvested, ageDays, warm, subreddits, queries]
+      required: [category, docs, comments, channels, ads, lastHarvested, ageDays, warm, subreddits, queries]
       properties:
         category: { type: string }
         docs: { type: integer }
         comments: { type: integer }
         channels: { type: integer }
+        ads:
+          type: integer
+          description: Distinct ads observed. See CategoryListing.ads.
         lastHarvested:
           type: integer
           description: Unix seconds. Zero when never harvested.

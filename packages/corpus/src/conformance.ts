@@ -384,6 +384,31 @@ export function runConformanceSuite(
       assert.equal(stats.docs, 3);
       assert.equal(stats.comments, 2);
       assert.equal(stats.channels, 2);
+      assert.equal(stats.ads, 0, 'records alone put no ads on the board');
+    });
+  });
+
+  /*
+   * Ad coverage travels with the category numbers, because ads are their own
+   * leg: a warm record corpus can hold zero ads, and until 2026-08-26 no
+   * listing said which categories could answer a format comparison at all.
+   */
+  test(`${driverName}: ad counts are distinct ads, never observations`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([doc({ externalId: '1' })], 'running shoes');
+      /* One ad observed twice is duration evidence about one ad. */
+      await c.addAdObservations([ad({ adId: 'ad_1' })]);
+      await c.addAdObservations([ad({ adId: 'ad_1' }), ad({ adId: 'ad_2' })]);
+
+      const stats = await c.categoryStats('running shoes');
+      assert.equal(stats.ads, 2, 'three observations of two ads is two ads');
+
+      const listed = await c.listCategories();
+      assert.equal(listed[0]?.ads, 2, 'the listing agrees with the per category stats');
+
+      await c.addDocs([doc({ externalId: 'e1' })], 'espresso machines');
+      const espresso = (await c.listCategories()).find((l) => l.category === 'espresso machines');
+      assert.equal(espresso?.ads, 0);
     });
   });
 

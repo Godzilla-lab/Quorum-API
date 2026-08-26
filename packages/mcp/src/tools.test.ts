@@ -441,3 +441,13 @@ test('minChannels on search_evidence demands breadth and can only demote', async
   assert.match(strict, /\*\*Weak signal, not a finding\.\*\*/);
   await corpus.close();
 });
+
+test('the category listing shows ad coverage, so compare_formats needs no probing', async () => {
+  const { call, corpus } = await tools();
+  const listing = await call('category_warmth', {});
+  assert.match(listing, /running shoes: \d+ records, \d+ channels, 0 ads/);
+
+  const single = await call('category_warmth', { category: 'running shoes' });
+  assert.match(single, /No ads held/);
+  await corpus.close();
+});
