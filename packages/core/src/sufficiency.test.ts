@@ -7,7 +7,7 @@ import { assessSufficiency } from './sufficiency.ts';
 
 const doc = (receiptId: string): Doc => ({
   receiptId, source: 'reddit', kind: 'comment', externalId: receiptId,
-  category: 'c', channel: 'r/running', text: 't', score: 1, url: 'u',
+  category: 'c', channel: 'r/running', text: `spoken by ${receiptId}`, score: 1, url: 'u',
   createdUtc: 0, harvestedAt: 0,
 });
 

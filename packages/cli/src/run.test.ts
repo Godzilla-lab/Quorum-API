@@ -999,11 +999,13 @@ test('a record with no usable date is in no window, and is still evidence withou
 function sideRecords(name: string, sizing: number, filler: number): SourceRecord[] {
   const rows: SourceRecord[] = [];
   let n = 0;
+  /* Distinct wording per record: identical text counts as one voice in
+   * corroborate, and these fixtures model many people, not one repost. */
   for (let i = 0; i < sizing; i++) {
-    rows.push(record(n++, `the ${name} sizing runs small, had to size up`, `r/side${i}`));
+    rows.push(record(n++, `the ${name} sizing runs small, had to size up, review ${i}`, `r/side${i}`));
   }
   for (let i = 0; i < filler; i++) {
-    rows.push(record(n++, `bought the ${name} last month and they are fine`, `r/other${i}`));
+    rows.push(record(n++, `bought the ${name} last month and they are fine, review ${i}`, `r/other${i}`));
   }
   /* Ids are per side, or the second run would upsert the first run's records. */
   return rows.map((r) => ({ ...r, externalId: `${name.replace(/\s+/g, '')}-${r.externalId}` }));

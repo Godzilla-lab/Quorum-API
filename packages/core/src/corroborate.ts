@@ -139,11 +139,31 @@ export function corroborate(
   const tiers: Record<EvidenceTier, number> = { A: 0, B: 0, C: 0, D: 0 };
   /* Counted separately from `seen`, because tier D must not promote a claim. */
   let promoting = 0;
+  /*
+   * IDENTICAL TEXT IS ONE VOICE, however many ids carry it. Receipt ids name
+   * (source, externalId), not the words, so the same boilerplate under two
+   * SEC accessions or the same paste in two repos is two ids with one text.
+   * Measured live 2026-08-26 by an outside evaluation: one Cleaner Yoga Mat
+   * S-1 counted twice toward "10 independent records". A repeated text still
+   * has its id LISTED, so the dedupe is visible and every id resolves, but it
+   * counts toward nothing: not records, not channels, not tiers.
+   */
+  const seenTexts = new Set<string>();
+  const textKey = (t: string): string => t.trim().replace(/\s+/g, ' ');
+  let counted = 0;
 
   for (const record of records) {
     if (seen.has(record.receiptId)) continue;
     seen.add(record.receiptId);
     receiptIds.push(record.receiptId);
+
+    const key = textKey(record.text);
+    /* An empty text cannot prove two records are the same utterance. */
+    if (key) {
+      if (seenTexts.has(key)) continue;
+      seenTexts.add(key);
+    }
+    counted++;
 
     const tier = tierOf(record.source);
     tiers[tier]++;
@@ -192,10 +212,20 @@ export function corroborate(
   const refutingSeen = new Set<string>();
   const refutingChannels = new Set<string>();
   const refutingIds: string[] = [];
+  const refutingTexts = new Set<string>();
+  let refutingCounted = 0;
   for (const record of options.refuting ?? []) {
     if (seen.has(record.receiptId) || refutingSeen.has(record.receiptId)) continue;
     refutingSeen.add(record.receiptId);
     refutingIds.push(record.receiptId);
+    /* The same text dedupe as the supporting side, plus the cross side guard:
+     * a text already counted in support must never also count against. */
+    const key = textKey(record.text);
+    if (key) {
+      if (seenTexts.has(key) || refutingTexts.has(key)) continue;
+      refutingTexts.add(key);
+    }
+    refutingCounted++;
     refutingChannels.add(`${record.source}/${record.channel}`);
   }
 
@@ -204,7 +234,7 @@ export function corroborate(
    * shapes nothing, because one "works fine for me" must not un-say a
    * corroborated pattern any more than one complaint may state one.
    */
-  const refuted = refutingSeen.size >= threshold;
+  const refuted = refutingCounted >= threshold;
   const verdict: Corroboration['verdict'] = basis !== 'none'
     ? (refuted ? 'contested' : 'finding')
     : (refuted ? 'refuted' : 'weak-signal');
@@ -212,13 +242,13 @@ export function corroborate(
   return {
     term,
     receiptIds,
-    records: seen.size,
+    records: counted,
     channels: channels.size,
     sources,
     tiers,
     basis,
     refuting: {
-      records: refutingSeen.size,
+      records: refutingCounted,
       channels: refutingChannels.size,
       receiptIds: refutingIds,
     },

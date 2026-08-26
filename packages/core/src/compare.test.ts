@@ -37,7 +37,7 @@ function doc(text: string, channel: string): Doc {
 /* `n` records for a term, each in its own channel so channel spread never
  * quietly decides a verdict a test meant to set with the record count. */
 const claim = (term: string, n: number) =>
-  corroborate(term, Array.from({ length: n }, (_, i) => doc(`${term} problem`, `r/${term}${i}`)));
+  corroborate(term, Array.from({ length: n }, (_, i) => doc(`${term} problem, voice ${i}`, `r/${term}${i}`)));
 
 function side(subject: string, corpusRecords: number, claims: Record<string, number>): CompareSide {
   return {

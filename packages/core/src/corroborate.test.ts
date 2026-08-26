@@ -10,7 +10,10 @@ function doc(over: Partial<Doc> & { receiptId: string }): Doc {
     externalId: over.receiptId,
     category: 'running shoes',
     channel: 'r/running',
-    text: 'they run small',
+    /* Distinct per receipt unless a test says otherwise: identical text is
+     * deliberately counted as one voice, so a shared default here would turn
+     * every counting test into a dedupe test. */
+    text: `they run small, says ${over.receiptId}`,
     score: 4,
     url: 'https://example.test/1',
     createdUtc: 1_700_000_000,
@@ -18,6 +21,33 @@ function doc(over: Partial<Doc> & { receiptId: string }): Doc {
     ...over,
   };
 }
+
+/*
+ * Receipt ids name (source, externalId), not the words, so byte identical
+ * text can arrive under two ids: the same S-1 boilerplate under two
+ * accessions, measured live 2026-08-26, counted as two independent records.
+ * One text is one voice however many ids carry it.
+ */
+test('byte identical text under different receipt ids counts once', () => {
+  const result = corroborate('sizing', [
+    doc({ receiptId: 'rc_a', text: 'inventory may be sold out in periods of high demand' }),
+    doc({ receiptId: 'rc_b', text: 'inventory may be sold out in periods of high demand', channel: 'other-filer' }),
+    doc({ receiptId: 'rc_c', text: 'inventory may be sold out  in periods of high demand ' }),
+  ]);
+  assert.equal(result.records, 1, 'one voice, however many accessions filed it');
+  assert.equal(result.channels, 1, 'a copied text cannot widen the channel spread');
+  assert.deepEqual(result.receiptIds, ['rc_a', 'rc_b', 'rc_c'],
+    'every id still lists and resolves, so the dedupe is visible rather than silent');
+  assert.equal(result.verdict, 'weak-signal');
+});
+
+test('a text counted in support never also counts as refutation', () => {
+  const result = corroborate('sizing', [doc({ receiptId: 'rc_a', text: 'fits fine either way' })], {
+    refuting: [doc({ receiptId: 'rc_z', text: 'fits fine either way' })],
+  });
+  assert.equal(result.refuting.records, 0, 'one utterance must never count on both sides');
+  assert.deepEqual(result.refuting.receiptIds, ['rc_z']);
+});
 
 test('below the threshold is a weak signal, never a finding', () => {
   const result = corroborate('sizing', [doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' })]);

@@ -151,7 +151,9 @@ const {
 const doc = (source, externalId, channel) => ({
   receiptId: receiptId(source, externalId),
   source, kind: 'comment', externalId, category: 'test',
-  channel, text: 'the sizing runs small and I had to send them back',
+  /* Distinct per record: identical text deliberately counts as one voice,
+   * so a shared string here would starve the receipt-count basis drive. */
+  channel, text: `the sizing runs small and I had to send them back, per ${externalId}`,
   score: 1, url: 'https://example.com/x', createdUtc: 1, harvestedAt: 1,
 });
 

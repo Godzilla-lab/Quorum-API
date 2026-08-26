@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import type { Doc, SourceId } from '@quorum/corpus';
 import { attestedFindings } from './attested.ts';
 
-const doc = (source: SourceId, id: string, channel: string, text = 'a long enough body of text to be a real record about the product'): Doc => ({
+const doc = (source: SourceId, id: string, channel: string, text = `a long enough body of text to be a real record about the product, filed as ${id}`): Doc => ({
   receiptId: `rc_${id.padStart(16, '0')}`,
   source, kind: 'post', externalId: id, category: 'knee brace',
   channel, text, score: 0, url: `https://example.test/${id}`, createdUtc: 1, harvestedAt: 1,

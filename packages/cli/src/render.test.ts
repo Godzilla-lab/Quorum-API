@@ -22,7 +22,9 @@ function doc(receiptId: string, channel = 'r/running'): Doc {
     externalId: receiptId,
     category: 'running shoes',
     channel,
-    text: 'they run small',
+    /* Distinct per receipt: identical text counts as one voice in
+     * corroborate, so a shared default would collapse every fixture claim. */
+    text: `they run small, says ${receiptId}`,
     score: 4,
     url: 'https://example.test/1',
     createdUtc: 1_700_000_000,

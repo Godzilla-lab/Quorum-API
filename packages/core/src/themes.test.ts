@@ -31,8 +31,11 @@ function doc(text: string, channel = 'r/running'): Doc {
 }
 
 /* One phrase, spread across `channels` different places. */
+/* The shared phrase gets distinct surrounding words per record, the way
+ * distinct people actually write; byte identical full texts count as one
+ * voice in corroborate, and that is the automod rule, not a fixture bug. */
 const spread = (text: string, channels: number): Doc[] =>
-  Array.from({ length: channels }, (_, i) => doc(text, `r/place${i}`));
+  Array.from({ length: channels }, (_, i) => doc(`${text} honestly${i}`, `r/place${i}`));
 
 /* ------------------------------------------------------------------ */
 /* the measurement that made it work                                   */
