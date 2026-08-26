@@ -296,13 +296,25 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       /*
        * Ranking is driver specific and NOT comparable across drivers: SQLite
        * returns bm25, where lower is better, and Postgres returns ts_rank,
-       * where higher is better. What conformance guarantees is the ordering and
-       * the result set, not the numeric value of `rank`.
+       * where higher is better. What IS shared is the ordering, and the
+       * conformance suite's rank test asserts it on both drivers.
+       *
+       * The normalisation argument 1 divides the rank by 1 + log(document
+       * length). Without it ts_rank ignores length entirely, and an outside
+       * evaluation of the hosted instance caught the consequence live: a long
+       * project update ranked top five for three unrelated queries and two
+       * SEC filings outranked every real customer on "out of stock sold out",
+       * while the sqlite driver's bm25 ordered the same corpus correctly.
+       * Measured against live Postgres 2026-08-26 on the evals/ranking pairs:
+       * no flag 2/4 correct, flag 1 4/4, flag 2 4/4 but it divides by raw
+       * length and crushes any substantive document to near zero, flag 32
+       * alone 2/4 since it only rescales. Flag 1 is bm25's soft penalty
+       * shape, so the two drivers now agree on what length costs.
        */
       const text =
         `SELECT d.receipt_id, d.source, d.kind, d.external_id, d.category, d.channel,
                 d.text, d.score, d.url, d.created_utc, d.harvested_at,
-                ts_rank(d.text_tsv, to_tsquery('english', $1)) AS rank
+                ts_rank(d.text_tsv, to_tsquery('english', $1), 1) AS rank
          FROM docs d
          WHERE ${where.join(' AND ')}
          ORDER BY rank DESC, d.score DESC
