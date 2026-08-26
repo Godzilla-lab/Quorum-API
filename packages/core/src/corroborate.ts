@@ -17,10 +17,14 @@
  * WHAT THIS CANNOT DO, STATED RATHER THAN GLOSSED.
  *
  * Records carry no author, so three comments by one person count as three. The
- * channel spread is reported alongside the record count so a reader can see how
- * concentrated the evidence is, but it is not gated on: the engine's threshold
- * is an absolute record count and it stays that way, because report parity
- * against the engine has to be measurable before the number is allowed to move.
+ * threshold unit is still an absolute record count, so parity against the
+ * engine on the count stays measurable. What changed on 2026-08-26 is a
+ * FLOOR, not a unit swap: promotion additionally requires
+ * MIN_CHANNELS_FOR_FINDING distinct channels, because a live category held
+ * 532 records from 2 channels and one subreddit can put any volume behind a
+ * claim without a second room hearing of it. Identical text also counts once
+ * however many receipt ids carry it, since the same date, an S-1 counted
+ * twice taught that one.
  *
  * THREE ROUTES TO A FINDING, ALL ADDED RATHER THAN SUBSTITUTED.
  *
@@ -56,7 +60,7 @@
  * process that only wanted to count. A pure function should not drag a driver
  * in behind it, and the hosted server runs on postgres regardless.
  */
-import { MIN_RECEIPTS } from '@quorum/corpus/constants';
+import { MIN_CHANNELS_FOR_FINDING, MIN_RECEIPTS } from '@quorum/corpus/constants';
 import { PROMOTING_TIERS, tierOf } from '@quorum/corpus/tiers';
 import type { Doc, EvidenceTier, SourceId } from '@quorum/corpus';
 
@@ -117,6 +121,12 @@ export interface Corroboration {
 export interface CorroborateOptions {
   /* Overridable so a test can drive the boundary without rewriting fixtures. */
   minReceipts?: number;
+  /*
+   * Distinct channels a verdict needs to promote, default
+   * MIN_CHANNELS_FOR_FINDING. Callers may raise it to demand wider spread;
+   * lowering it below the constant is for tests driving the boundary.
+   */
+  minChannelsForFinding?: number;
   /*
    * Records that affirmatively contradict the claim, from the stance split.
    * Counted against the same threshold as the supporting side, because
@@ -234,8 +244,19 @@ export function corroborate(
    * shapes nothing, because one "works fine for me" must not un-say a
    * corroborated pattern any more than one complaint may state one.
    */
-  const refuted = refutingCounted >= threshold;
-  const verdict: Corroboration['verdict'] = basis !== 'none'
+  /*
+   * THE CHANNEL FLOOR, applied to both sides identically. A basis measures
+   * that enough voices spoke; the floor measures that they spoke in more than
+   * one room. 532 records from 2 channels is a conversation and 5 records
+   * from 1 channel is a room agreeing with itself, so promotion additionally
+   * needs MIN_CHANNELS_FOR_FINDING distinct channels, and disagreement is
+   * held to the same bar for the same reason. The basis is preserved on a
+   * demoted claim so a report can show why it came close.
+   */
+  const channelFloor = options.minChannelsForFinding ?? MIN_CHANNELS_FOR_FINDING;
+  const supported = basis !== 'none' && channels.size >= channelFloor;
+  const refuted = refutingCounted >= threshold && refutingChannels.size >= channelFloor;
+  const verdict: Corroboration['verdict'] = supported
     ? (refuted ? 'contested' : 'finding')
     : (refuted ? 'refuted' : 'weak-signal');
 

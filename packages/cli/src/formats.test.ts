@@ -311,11 +311,11 @@ test('a theme phrase and a trend reason are flattened too', () => {
 const comparison = () => compareSides([
   {
     subject: 'wool runner', category: 'wool runner', corpusRecords: 300,
-    claims: [corroborate('sizing', Array.from({ length: 45 }, (_, i) => doc(`rc_a${i}`, `r/a${i}`)))],
+    claims: [corroborate('sizing', Array.from({ length: 45 }, (_, i) => doc(`rc_a${i}`, `runs small ${i}`, `r/a${i}`)))],
   },
   {
     subject: 'brooks ghost', category: 'brooks ghost', corpusRecords: 100,
-    claims: [corroborate('sizing', Array.from({ length: 2 }, (_, i) => doc(`rc_b${i}`, `r/b${i}`)))],
+    claims: [corroborate('sizing', Array.from({ length: 2 }, (_, i) => doc(`rc_b${i}`, `fits fine ${i}`, `r/b${i}`)))],
   },
 ], ['sizing']);
 

@@ -32,6 +32,20 @@ export const WARM_MAX_AGE_DAYS = 14;
  */
 export const MIN_RECEIPTS = 3;
 
+/*
+ * How many distinct channels a finding needs on top of the receipt count.
+ *
+ * The record count measures volume and the channel spread measures breadth,
+ * and volume alone lied: the live corpus held a category with 532 records
+ * from 2 channels, which is one long conversation, and a single subreddit
+ * can put any number of records behind a claim without a second room ever
+ * having heard of it. One channel is one room. Chris set this to 2 on
+ * 2026-08-26 after an outside evaluation flagged the office chair category;
+ * a claim below it prints as a weak signal with its basis preserved, so a
+ * report can still show why it came close.
+ */
+export const MIN_CHANNELS_FOR_FINDING = 2;
+
 const SECONDS_PER_DAY = 86400;
 
 /*

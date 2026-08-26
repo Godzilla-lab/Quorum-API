@@ -57,11 +57,48 @@ test('below the threshold is a weak signal, never a finding', () => {
 
 test('at the threshold it becomes a finding', () => {
   const result = corroborate('sizing', [
-    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c' }),
+    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c', channel: 'r/trailrunning' }),
   ]);
   assert.equal(result.records, 3);
   assert.equal(result.verdict, 'finding');
   assert.equal(result.threshold, 3);
+});
+
+/*
+ * The channel floor, set 2026-08-26. A live category held 532 records from 2
+ * channels, and one subreddit can put any volume behind a claim without a
+ * second room ever hearing of it. One channel is one room.
+ */
+test('any number of records from one channel is a weak signal, basis preserved', () => {
+  const result = corroborate('sizing', [
+    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c' }),
+    doc({ receiptId: 'rc_d' }), doc({ receiptId: 'rc_e' }),
+  ]);
+  assert.equal(result.records, 5);
+  assert.equal(result.channels, 1);
+  assert.equal(result.verdict, 'weak-signal', 'volume without breadth does not promote');
+  assert.equal(result.basis, 'receipt-count', 'the basis survives so a report can show why it came close');
+});
+
+test('two channels clear the floor', () => {
+  const result = corroborate('sizing', [
+    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c', channel: 'r/trailrunning' }),
+  ]);
+  assert.equal(result.channels, 2);
+  assert.equal(result.verdict, 'finding');
+});
+
+test('refutation is held to the same channel floor', () => {
+  const result = corroborate('sizing', [
+    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c', channel: 'r/trailrunning' }),
+  ], {
+    refuting: [
+      doc({ receiptId: 'rc_x' }), doc({ receiptId: 'rc_y' }), doc({ receiptId: 'rc_z' }),
+    ],
+  });
+  assert.equal(result.refuting.records, 3);
+  assert.equal(result.verdict, 'finding',
+    'three disagreeing voices in one room do not contest what three rooms agreed on');
 });
 
 /*
@@ -118,13 +155,13 @@ test('no evidence is an empty weak signal rather than a crash', () => {
 });
 
 test('the threshold is overridable and the applied value is reported', () => {
-  const result = corroborate('sizing', [doc({ receiptId: 'rc_a' })], { minReceipts: 1 });
+  const result = corroborate('sizing', [doc({ receiptId: 'rc_a' })], { minReceipts: 1, minChannelsForFinding: 1 });
   assert.equal(result.verdict, 'finding');
   assert.equal(result.threshold, 1);
 });
 
 test('findingsOnly drops everything under the threshold', () => {
-  const strong = corroborate('sizing', [doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c' })]);
+  const strong = corroborate('sizing', [doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c', channel: 'r/trailrunning' })]);
   const weak = corroborate('smell', [doc({ receiptId: 'rc_d' })]);
   assert.deepEqual(findingsOnly([strong, weak]).map((c) => c.term), ['sizing']);
 });
@@ -136,7 +173,7 @@ test('findingsOnly drops everything under the threshold', () => {
 
 test('the receipt count route is untouched, so parity with the engine still holds', () => {
   const r = corroborate('sizing', [
-    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c' }),
+    doc({ receiptId: 'rc_a' }), doc({ receiptId: 'rc_b' }), doc({ receiptId: 'rc_c', channel: 'r/trailrunning' }),
   ]);
   assert.equal(r.verdict, 'finding');
   assert.equal(r.basis, 'receipt-count');
