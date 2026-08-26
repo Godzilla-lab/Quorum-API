@@ -272,6 +272,35 @@ test('warmth tells an agent whether asking is cheap before it asks', async () =>
   await corpus.close();
 });
 
+/*
+ * The cold run copy names a door the caller can actually open. The earlier
+ * text described harvesting as available on every surface, and on the read
+ * only remote it was not: an outside evaluation spent three calls proving
+ * the dead end, 2026-08-26.
+ */
+test('the nothing held copy tells the truth about who can harvest', async () => {
+  const readOnly = await tools(false);
+  const ro = await readOnly.call('category_warmth', { category: 'garden hoses' });
+  assert.match(ro, /read only and cannot start one/);
+  assert.match(ro, /POST \/v1\/reports/, 'the hosted door is named');
+  assert.match(ro, /QUORUM_MCP_RESEARCH=1/, 'and so is the local one');
+  assert.doesNotMatch(ro, /Call `research_product`/, 'no tool is advertised that tools/list does not carry');
+  await readOnly.corpus.close();
+
+  const research = await tools(true);
+  const rw = await research.call('category_warmth', { category: 'garden hoses' });
+  assert.match(rw, /Call `research_product`/, 'when the tool exists, the copy points at it');
+  assert.doesNotMatch(rw, /read only/);
+  await research.corpus.close();
+});
+
+test('the listing states the warm boundary instead of leaving it to be bracketed', async () => {
+  const { call, corpus } = await tools();
+  const out = await call('category_warmth', {});
+  assert.match(out, /Warm means 150 or more records harvested under 14 days ago/);
+  await corpus.close();
+});
+
 test('WITH NO CATEGORY, WARMTH LISTS WHAT EXISTS INSTEAD OF MAKING A CALLER GUESS', async () => {
   /* Measured on the live instance 2026-08-24: an outside tester guessed five
    * categories, four returned nothing, and nothing reads as broken. */

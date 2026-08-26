@@ -17,7 +17,7 @@
  */
 
 import { corroborate, formatVerdict, adsForVerdict, splitEvidenceRows, type Corroboration } from '@quorum/core';
-import { MIN_CHANNELS_FOR_FINDING } from '@quorum/corpus/constants';
+import { MIN_CHANNELS_FOR_FINDING, WARM_MAX_AGE_DAYS, WARM_MIN_DOCS } from '@quorum/corpus/constants';
 import { SOURCE_TIER } from '@quorum/corpus/tiers';
 import type { CorpusDriver, Doc, SourceId } from '@quorum/corpus';
 import type { ToolDefinition } from './protocol.ts';
@@ -401,7 +401,14 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       if (!category) {
         const all = await corpus.listCategories();
         if (!all.length) return 'The corpus holds no categories yet. The first report warms the first one.';
-        const out: string[] = ['## Categories held', ''];
+        /* The boundary is stated rather than left for a caller to infer by
+         * bracketing the list: an outside evaluation did exactly that. */
+        const out: string[] = [
+          '## Categories held',
+          '',
+          `Warm means ${WARM_MIN_DOCS} or more records harvested under ${WARM_MAX_AGE_DAYS} days ago: enough material, fresh enough to trust.`,
+          '',
+        ];
         for (const c of all.slice(0, LISTED_CATEGORIES)) {
           const age = c.ageDays === null ? 'never harvested' : `${c.ageDays.toFixed(1)} days old`;
           /* Ads are listed beside records so a caller can see which
@@ -415,9 +422,20 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       const stats = await corpus.categoryStats(category);
 
       if (!stats.docs) {
-        return `Nothing held for ${JSON.stringify(category)}.\n\n`
-          + 'A report on it would be a cold run: minutes of throttled retrieval against '
-          + 'upstream archives. Worth doing once, and instant every time after. '
+        /*
+         * THE COPY NAMES A DOOR THE CALLER CAN ACTUALLY OPEN. The earlier
+         * text described a cold run as an available action, and on the read
+         * only surface it was not: an outside evaluation spent three calls
+         * discovering the dead end, 2026-08-26. Cost transparency stays; the
+         * affordance now depends on which server this is.
+         */
+        const how = deps.research
+          ? 'Call `research_product` to run it: minutes of throttled retrieval against upstream '
+            + 'archives, worth doing once, and instant every time after.'
+          : 'This server is read only and cannot start one. A keyed `POST /v1/reports` at the '
+            + 'hosted API runs the harvest (minutes of throttled retrieval, instant ever after), '
+            + 'or a local MCP started with `QUORUM_MCP_RESEARCH=1` exposes the research tool.';
+        return `Nothing held for ${JSON.stringify(category)}.\n\n${how}\n\n`
           + 'Call this tool with no category to list what is already held.';
       }
       const age = stats.ageDays === null ? 'unknown age' : `last harvested ${stats.ageDays.toFixed(1)} days ago`;
