@@ -17,6 +17,7 @@
  */
 
 import { corroborate, formatVerdict, adsForVerdict, splitEvidenceRows, type Corroboration } from '@quorum/core';
+import { MIN_CHANNELS_FOR_FINDING } from '@quorum/corpus/constants';
 import type { CorpusDriver, Doc } from '@quorum/corpus';
 import type { ToolDefinition } from './protocol.ts';
 
@@ -64,11 +65,26 @@ function quote(doc: Doc, maxChars = 240): string {
   return `> ${excerpt}\n> \n> \`${doc.receiptId}\` ${doc.source} ${doc.channel}`;
 }
 
+/* Records to channels ratio past which the spread itself is worth a warning:
+ * the live case was a category holding 532 records from 2 channels, which is
+ * one long conversation wearing the record count of a market. 2026-08-26. */
+const CONCENTRATION_RATIO = 50;
+
+function concentrationWarning(records: number, channels: number): string | null {
+  if (records < CONCENTRATION_RATIO || records / Math.max(channels, 1) <= CONCENTRATION_RATIO) return null;
+  return `Concentration warning: ${records} records from ${channels} `
+    + `${channels === 1 ? 'channel' : 'channels'} is closer to one long conversation than a market. `
+    + 'Weigh the channel count, not the record count.';
+}
+
 function corroborationLine(c: Corroboration, atLeast: boolean): string {
-  /* A full scan window means the true count may be higher, never lower, so
+  /* A full scan window means the true counts may be higher, never lower, so
    * the floor is stated in the output itself rather than left to a schema
-   * note nobody reads at answer time. */
+   * note nobody reads at answer time. The channel count comes from the same
+   * truncated window, so it is hedged the same way; until 2026-08-26 only
+   * the record count carried the hedge and the channel figure printed flat. */
   const records = atLeast ? `at least ${c.records}` : `${c.records}`;
+  const channels = atLeast ? `at least ${c.channels}` : `${c.channels}`;
   /* Divided evidence is stated as division, with both counts, never as
    * either side alone. This is the arithmetic admitting disagreement. */
   if (c.verdict === 'contested') {
@@ -79,10 +95,19 @@ function corroborationLine(c: Corroboration, atLeast: boolean): string {
     return `**Refuted.** ${c.refuting.records} records say the opposite, past the threshold of `
       + `${c.threshold}, while support stayed below it. Do not state the claim as a market pattern.`;
   }
-  return c.verdict === 'finding'
-    ? `**Finding.** ${records} independent records across ${c.channels} channels, threshold ${c.threshold}.`
-    : `**Weak signal, not a finding.** ${records} records across ${c.channels} channels, `
-      + `and the threshold is ${c.threshold}. Do not state this as a market pattern.`;
+  if (c.verdict === 'finding') {
+    return `**Finding.** ${records} independent records across ${channels} channels, threshold ${c.threshold}.`;
+  }
+  /* A demotion by the channel floor says so: "the threshold is 3" would be
+   * a lie about why five records in one room are not a finding. */
+  if (c.basis !== 'none') {
+    return `**Weak signal, not a finding.** ${records} records across ${channels} `
+      + `${c.channels === 1 && !atLeast ? 'channel' : 'channels'}. The records clear the threshold of ${c.threshold}, `
+      + `but a finding needs ${MIN_CHANNELS_FOR_FINDING} distinct channels and one channel is one room. `
+      + 'Do not state this as a market pattern.';
+  }
+  return `**Weak signal, not a finding.** ${records} records across ${channels} channels, `
+    + `and the threshold is ${c.threshold}. Do not state this as a market pattern.`;
 }
 
 export interface ToolDeps {
@@ -148,6 +173,11 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       out.push('');
       out.push(corroborationLine(c, hits.length === COUNT_SCAN));
       out.push('');
+      const concentrated = concentrationWarning(c.records, c.channels);
+      if (concentrated) {
+        out.push(concentrated);
+        out.push('');
+      }
       /*
        * THE FALLBACK CONFESSES. Search runs AND first and falls back to any
        * word, and without this line a nonsense query ("pull request commit
@@ -310,8 +340,10 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       const adsLine = ads.length
         ? `${ads.length} distinct ads held, so compare_formats has material here.`
         : 'No ads held: records cover conversation only, and compare_formats has nothing to compare yet.';
+      const concentrated = concentrationWarning(stats.docs, stats.channels);
       return `## ${category}\n\n`
         + `${stats.docs} records across ${stats.channels} channels, ${age}. ${adsLine}\n\n`
+        + (concentrated ? `${concentrated}\n\n` : '')
         + (stats.warm
           ? '**Warm.** Answering from this costs no upstream requests and returns in well under a second.'
           : '**Cold.** Held records are usable, but a fresh report would retrieve again, '

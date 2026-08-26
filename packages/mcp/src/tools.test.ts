@@ -331,3 +331,56 @@ test('EMPTY AND MISSING ARGUMENTS ANSWER, THEY DO NOT THROW', async () => {
   }
   await corpus.close();
 });
+
+/* ------------------------------------------------------------------ */
+/* hedges and concentration, added 2026-08-26                          */
+/* ------------------------------------------------------------------ */
+
+test('a full scan window hedges the channel count, not just the record count', async () => {
+  const { call, corpus } = await tools();
+  /* Fill the scan window: 500 distinct records carrying the query word. */
+  const bulk: DocInput[] = [];
+  for (let i = 0; i < 520; i++) {
+    bulk.push(doc(`the sizing complaint number ${i} about these`, `r/bulk${i % 7}`));
+  }
+  await corpus.addDocs(bulk, 'running shoes');
+  const out = await call('search_evidence', { query: 'sizing', category: 'running shoes' });
+  assert.match(out, /at least \d+ independent records across at least \d+ channels/,
+    'both counts come from the same truncated window, so both carry the floor');
+  await corpus.close();
+});
+
+test('a channel floor demotion says one channel is one room, not "below threshold"', async () => {
+  const { call, corpus } = await tools();
+  await corpus.addDocs([
+    doc('the strap creaks after a month', 'r/onlyroom'),
+    doc('strap creaks whenever I lift', 'r/onlyroom'),
+    doc('another strap that creaks, third one', 'r/onlyroom'),
+    doc('my strap also creaks on cold days', 'r/onlyroom'),
+  ], 'lifting straps');
+  const out = await call('search_evidence', { query: 'creaks', category: 'lifting straps' });
+  assert.match(out, /\*\*Weak signal, not a finding\.\*\*/);
+  assert.match(out, /clear the threshold/, 'the records did clear the record threshold');
+  assert.match(out, /one channel is one room/, 'and the real reason for the demotion is named');
+  await corpus.close();
+});
+
+test('extreme concentration carries a warning in search and in warmth', async () => {
+  const { call, corpus } = await tools();
+  const bulk: DocInput[] = [];
+  for (let i = 0; i < 120; i++) {
+    bulk.push(doc(`the office chair squeaks in a new way, report ${i}`, i === 0 ? 'r/chairtalk' : 'r/onechair'));
+  }
+  await corpus.addDocs(bulk, 'office chair');
+  const search = await call('search_evidence', { query: 'squeaks', category: 'office chair' });
+  assert.match(search, /Concentration warning/);
+  assert.match(search, /one long conversation/);
+
+  const warmth = await call('category_warmth', { category: 'office chair' });
+  assert.match(warmth, /Concentration warning/);
+
+  /* And a healthy spread stays unwarned. */
+  const healthy = await call('search_evidence', { query: 'sizing', category: 'running shoes' });
+  assert.doesNotMatch(healthy, /Concentration warning/);
+  await corpus.close();
+});
