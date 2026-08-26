@@ -57,6 +57,7 @@ export interface ReviewEntry {
   title?: ReviewLabel;
   content?: ReviewLabel;
   author?: { name?: ReviewLabel } | null;
+  updated?: ReviewLabel;
   'im:rating'?: ReviewLabel;
   'im:version'?: ReviewLabel;
   'im:voteSum'?: ReviewLabel;
@@ -90,6 +91,21 @@ export function reviewText(entry: ReviewEntry): string {
   if (!body) return '';
   const joined = title && !body.startsWith(title) ? `${title}. ${body}` : body;
   return joined.replace(/\s+/g, ' ').trim();
+}
+
+/*
+ * The review's own timestamp, from the per entry `updated` label
+ * ("2026-08-18T20:34:57-07:00" in the live feed). An earlier version of this
+ * adapter claimed the feed carried no usable per review date and stored zero
+ * for every review, while the repo's own fixture carried a distinct `updated`
+ * on every entry; an outside evaluation caught the consequence live on
+ * 2026-08-26, when the four most useful records of a session all resolved
+ * undated. Zero remains the honest unknown when the label is absent or does
+ * not parse, and the corpus treats zero as undated everywhere dates matter.
+ */
+export function reviewDate(entry: ReviewEntry): number {
+  const parsed = Date.parse(text(entry.updated));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed / 1000) : 0;
 }
 
 export function reviewUrl(entry: ReviewEntry, appId: number, storefront: string): string {
@@ -223,9 +239,7 @@ export function createAppStoreSource(options: AppStoreOptions = {}): Source {
            * what the reviewer said. */
           score: reviewRating(entry),
           url: reviewUrl(entry, app.id, storefront),
-          /* The RSS feed carries no usable review timestamp, only a feed level
-           * `updated`. Zero is honest: an invented date would be worse. */
-          createdUtc: 0,
+          createdUtc: reviewDate(entry),
           origin: `App Store ${storefront}`,
         };
       }

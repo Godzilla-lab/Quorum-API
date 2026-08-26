@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-import { createAppStoreSource, reviewRating, reviewText, reviewUrl } from './index.ts';
+import { createAppStoreSource, reviewDate, reviewRating, reviewText, reviewUrl } from './index.ts';
 import { runSourceConformance } from '../conformance.ts';
 import type { Ctx, SourceRecord } from '../source.ts';
 
@@ -122,10 +122,24 @@ test('records carry stars, real text and a link', async () => {
     assert.ok((r.score ?? 0) >= 1 && (r.score ?? 0) <= 5, `star rating out of range: ${r.score}`);
     assert.ok((r.text ?? '').length >= 40);
     assert.match(r.url ?? '', /^https?:\/\//);
-    /* The feed carries no usable per review date. Zero is honest; an invented
-     * timestamp would be worse than an absent one. */
-    assert.equal(r.createdUtc, 0);
+    /*
+     * Every entry in the captured feed carries its own `updated` timestamp.
+     * This assertion used to demand zero, under a comment claiming the feed
+     * had no per review date; the fixture itself disproved that, and the
+     * wrong belief survived because the test enforced it. 2026-08-26.
+     */
+    assert.ok((r.createdUtc ?? 0) >= 1_577_836_800, `review date missing or implausible: ${r.createdUtc}`);
   }
+  const distinctDates = new Set(records.map((r) => r.createdUtc));
+  assert.ok(distinctDates.size > 1,
+    'dates are per review, not the feed level timestamp copied onto every entry');
+});
+
+test('a review with a missing or garbage updated label stays honestly undated', () => {
+  assert.equal(reviewDate({}), 0);
+  assert.equal(reviewDate({ updated: { label: null } }), 0);
+  assert.equal(reviewDate({ updated: { label: 'not a date' } }), 0);
+  assert.equal(reviewDate({ updated: { label: '2026-08-18T20:34:57-07:00' } }), 1_787_110_497);
 });
 
 test('a storefront with no reviews is silent, not an error', async () => {
