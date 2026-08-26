@@ -200,7 +200,7 @@ only ever ADD sources, and a missing one degrades a run rather than failing it.
 |---|---|
 | `QUORUM_CONTACT_EMAIL` | Not a key. The SEC requires a User-Agent naming who is calling and returns 403 without one, so `sec-edgar` reports itself unconfigured until this is set. A role address outlives whoever set it up. |
 | `OPENROUTER_API_KEY` | Subject expansion, `--synthesise` and `--read-images`. All three are off by default, and the counts never come from a model, so the deterministic report is identical without it. |
-| `APIFY_TOKEN` | The Meta ad library, and the only metered source in the repo. Every call charges the cost meter and lands on the report's bill. Absent, the ads leg is skipped exactly as `--no-ads` does. |
+| `APIFY_TOKEN` | The two metered legs: the Meta ad library and Amazon reviews, both through the same Apify account. Every call charges the cost meter and lands on the report's bill. Absent, both legs are skipped, exactly as `--no-ads` does for ads. |
 | `QUORUM_CORPUS` | SQLite corpus path, read by the **server and the MCP server**. Default `./quorum.db`. The CLI does not read it: pass `--corpus` instead. |
 | `QUORUM_PG_URL` | Postgres, for the hosted corpus. Paste the provider uri whole: it is parsed rather than split, so `sslmode` is honoured and a password containing `@` survives. |
 | `QUORUM_PG_CA` | Path to the provider CA. Worth setting, because `sslmode=require` means encrypt and **not** verify. |
@@ -800,6 +800,11 @@ This runs on archives other people maintain, most of them for free:
   recall data is what makes attested evidence possible
 - [SEC EDGAR](https://www.sec.gov/edgar), which asks callers to identify
   themselves and is the reason `QUORUM_CONTACT_EMAIL` exists
+- [Apify](https://apify.com/), the one paid vendor, carrying both metered legs:
+  the Meta Ad Library scraper and Amazon product reviews. The reviews leg reads
+  only what Amazon's public product page shows a logged out visitor, plans
+  nothing unless the subject is an Amazon product, and every call charges the
+  cost meter at rates verified against real billing
 - [Standard Webhooks](https://www.standardwebhooks.com/), so webhook signing is
   somebody else's well reviewed design rather than ours
 

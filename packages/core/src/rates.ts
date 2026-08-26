@@ -103,6 +103,18 @@ export const RATES: Readonly<Record<string, Rate>> = {
   'apify.fb-ads-item': { perCall: 0.00076, verified: true, asOf: '2026-08-22' },
 
   /*
+   * Apify Amazon Reviews Scraper (automation-lab), pay per event: a one time
+   * run start fee plus a fee per review extracted. MEASURED AGAINST REAL
+   * BILLING 2026-08-26: one run of one ASIN moved monthly usage $0.023660 to
+   * $0.049678, a delta of $0.026018 for 8 reviews plus the start, against a
+   * predicted 0.01 + 8 x 0.002 = $0.026. Stated and billed prices agree, so
+   * both are verified. The free plan tier price is the one entered; paid
+   * plans price the review event lower and would only over count.
+   */
+  'apify.amazon-review-run': { perCall: 0.01, verified: true, asOf: '2026-08-26' },
+  'apify.amazon-review-item': { perCall: 0.002, verified: true, asOf: '2026-08-26' },
+
+  /*
    * THE FREE OPENROUTER MODELS THE SYNTHESIS PATH DEFAULTS TO.
    *
    * Zero is entered here rather than left to the unknown key fallback, and the

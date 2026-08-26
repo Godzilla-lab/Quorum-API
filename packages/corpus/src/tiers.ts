@@ -62,6 +62,7 @@ export const SOURCE_TIER: Record<SourceId, EvidenceTier> = {
   steam: 'C',
   appstore: 'C',
   youtube: 'C',
+  amazon: 'C',
   review: 'C',
 
   wikipedia: 'D',
@@ -124,6 +125,7 @@ export const SOURCE_SCORE_KIND: Record<SourceId, ScoreKind> = {
   steam: 'points',
   appstore: 'stars',
   youtube: 'points',
+  amazon: 'stars',
   review: 'stars',
 
   wikipedia: 'none',

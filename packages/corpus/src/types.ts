@@ -36,6 +36,7 @@ export type SourceId =
   | 'steam'
   | 'appstore'
   | 'youtube'
+  | 'amazon'
   | 'review'
   /* Tier D, context. Sets the scene and proves nothing alone. */
   | 'wikipedia'

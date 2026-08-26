@@ -805,7 +805,7 @@ components:
         Where a record came from. Every source is assigned an evidence tier at
         compile time, so adding a source without deciding what its evidence is
         worth fails the build rather than defaulting quietly.
-      enum: [sec-edgar, cpsc, nhtsa, openfda, eu-safety-gate, ad, shopify, woocommerce, wayback, commoncrawl, npm, github, reddit, hackernews, discourse, stackexchange, lobsters, steam, appstore, youtube, review, wikipedia, gdelt, openalex, producthunt, jobs]
+      enum: [sec-edgar, cpsc, nhtsa, openfda, eu-safety-gate, ad, shopify, woocommerce, wayback, commoncrawl, npm, github, reddit, hackernews, discourse, stackexchange, lobsters, steam, appstore, youtube, amazon, review, wikipedia, gdelt, openalex, producthunt, jobs]
 
     EvidenceTier:
       type: string

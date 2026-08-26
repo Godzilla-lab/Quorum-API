@@ -179,6 +179,10 @@ const sourcesDir = join(ROOT, 'packages/sources/src');
 const PACKAGES_DIR = join(ROOT, 'packages');
 const CREDENTIALLED_VENDORS = new Map([
   ['packages/sources/src/meta-ads/apify.ts', 'api.apify.com'],
+  /* Same vendor, same account, same rule: we authenticate to Apify, never to
+   * Amazon, and the actor reads only what Amazon's public product page shows
+   * a logged out visitor. */
+  ['packages/sources/src/amazon-reviews/index.ts', 'api.apify.com'],
   ['packages/llm/src/vision.ts', 'openrouter.ai'],
   ['packages/llm/src/expand.ts', 'openrouter.ai'],
   ['packages/llm/src/claims.ts', 'openrouter.ai'],

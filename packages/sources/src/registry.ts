@@ -15,6 +15,7 @@
 
 import type { AdSource } from './ad-source.ts';
 import type { Source } from './source.ts';
+import { createAmazonReviewsSource } from './amazon-reviews/index.ts';
 import { createAppStoreSource } from './appstore/index.ts';
 import { createArcticShiftSource } from './reddit-arcticshift/index.ts';
 import { createCpscSource } from './cpsc/index.ts';
@@ -26,9 +27,15 @@ import { createNhtsaSource } from './nhtsa/index.ts';
 import { createOpenFdaSource } from './openfda/index.ts';
 import { createSecEdgarSource } from './sec-edgar/index.ts';
 
-/* Every free source, in the order a run should try them. */
+/*
+ * Every record source a run tries, in order. All free and keyless except
+ * `amazon`, which is metered through the Apify account: it reports itself
+ * unconfigured without APIFY_TOKEN, plans nothing unless the subject is an
+ * Amazon product, and checks the spend cap before every call, so its
+ * presence here costs a keyless run exactly nothing.
+ */
 export const SOURCE_IDS = [
-  'reddit', 'hackernews', 'github', 'appstore', 'cpsc', 'openfda', 'nhtsa', 'sec-edgar', 'eu-safety-gate',
+  'reddit', 'hackernews', 'github', 'appstore', 'amazon', 'cpsc', 'openfda', 'nhtsa', 'sec-edgar', 'eu-safety-gate',
 ] as const;
 
 /*
@@ -50,6 +57,7 @@ export function makeSource(id: string): Source {
     case 'openfda': return createOpenFdaSource();
     case 'nhtsa': return createNhtsaSource();
     case 'appstore': return createAppStoreSource();
+    case 'amazon': return createAmazonReviewsSource();
     case 'sec-edgar': return createSecEdgarSource();
     case 'eu-safety-gate': return createEuSafetyGateSource();
     /* Callers validate ids first, so this is unreachable in practice. Kept so
