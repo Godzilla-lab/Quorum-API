@@ -1874,13 +1874,38 @@ components:
           oneOf:
             - type: 'null'
             - $ref: '#/components/schemas/SourceId'
-        minScore: { type: [integer, 'null'] }
-        limit: { type: integer, minimum: 1, maximum: 500, default: 50 }
-        cursor:
-          type: string
+        sources:
+          type: [array, 'null']
+          items: { $ref: '#/components/schemas/SourceId' }
+          description: Include only these sources. An unknown source id is a 400, never a silent empty result.
+        excludeSources:
+          type: [array, 'null']
+          items: { $ref: '#/components/schemas/SourceId' }
           description: |
-            From the previous response. Responses are always bounded, because an
-            unbounded one is a denial of service vector against ourselves.
+            Drop these sources. Exclusion wins over inclusion for the same
+            source. The canonical use is dropping the institutional sources
+            from a consumer voice question.
+        sourceClasses:
+          type: [array, 'null']
+          items:
+            type: string
+            enum: [consumer_voice, practitioner, institutional]
+          description: |
+            Caller facing names for the evidence tiers, expanded server side:
+            consumer_voice is tier C, practitioner is B, institutional is A.
+            Unioned with `sources` when both are sent.
+        minScore: { type: [integer, 'null'] }
+        from:
+          type: [integer, 'null']
+          description: |
+            Unix seconds, inclusive. Windows apply to when the record was
+            written by its author, never to when it was harvested. A record
+            whose date is unknown (createdUtc 0) is excluded from any window
+            rather than assumed recent.
+        until:
+          type: [integer, 'null']
+          description: Unix seconds, inclusive. See `from` for the window rules.
+        limit: { type: integer, minimum: 1, maximum: 500, default: 50 }
 
     EvidenceSearchResponse:
       type: object
@@ -1895,7 +1920,12 @@ components:
                 properties:
                   rank:
                     type: number
-                    description: Relevance rank, for ordering only. Not a confidence.
+                    description: |
+                      Relevance rank, for ordering only. Not a confidence, and
+                      not comparable across deployments: the sqlite engine
+                      reports bm25 (lower is better) and the hosted postgres
+                      engine reports normalised ts_rank (higher is better).
+                      Only the order of one response means anything.
         matchedAllWords:
           type: boolean
           description: |

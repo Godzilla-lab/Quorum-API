@@ -368,6 +368,15 @@ export interface SearchOptions extends DateWindow {
   limit?: number;
   minScore?: number | null;
   source?: SourceId | null;
+  /*
+   * Include and exclude lists, added 2026-08-26 because the single `source`
+   * filter cannot express the request every live evaluation session actually
+   * made: drop the institutional sources from a consumer voice question.
+   * `source` and `sources` compose by intersection like every other filter
+   * here; exclusion always wins over inclusion for the same source.
+   */
+  sources?: readonly SourceId[] | null;
+  excludeSources?: readonly SourceId[] | null;
 }
 
 /*

@@ -32,7 +32,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { meterFor, type Quotas } from './quotas.ts';
 import type { CorpusDriver, SourceId } from '@quorum/corpus';
 import { isReceiptId } from '@quorum/corpus';
-import { scoreKindOf, tierOf } from '@quorum/corpus/tiers';
+import { SOURCE_TIER, scoreKindOf, tierOf, type EvidenceTier } from '@quorum/corpus/tiers';
 import { resolveCitations, fabricationReport, type ModelClaim } from '@quorum/core';
 import type { JobQueue, ReportRequest, ReportSnapshot } from './jobs.ts';
 import { checkWebhookUrl, deriveSecret } from './webhooks.ts';
@@ -593,15 +593,96 @@ export function createReceiptsServer(options: ServerOptions): Server {
       method: 'POST',
       pattern: /^\/v1\/evidence\/search$/,
       handler: async (ctx) => {
-        const body = ctx.body as { query?: unknown; category?: unknown; source?: unknown; limit?: unknown };
+        const body = ctx.body as {
+          query?: unknown; category?: unknown; source?: unknown; limit?: unknown;
+          minScore?: unknown; from?: unknown; until?: unknown;
+          sources?: unknown; excludeSources?: unknown; sourceClasses?: unknown;
+        };
         const query = typeof body?.query === 'string' ? body.query.trim() : '';
         if (!query) return error(400, 'invalid_request', 'query is required', ctx.requestId);
+
+        /*
+         * A source name nobody stores used to be cast straight through, so a
+         * typo returned an empty 200 indistinguishable from "we hold
+         * nothing", the exact ambiguity the categories route was added to
+         * kill. Validation is against SOURCE_TIER because that table is
+         * exhaustive over every storable source, while the retrieval
+         * registry only knows the sources that can harvest today.
+         */
+        const knownSource = (s: string): s is SourceId => s in SOURCE_TIER;
+        const sourceList = (value: unknown, field: string): SourceId[] | { message: string } => {
+          if (value == null) return [];
+          if (!Array.isArray(value) || value.some((s) => typeof s !== 'string')) {
+            return { message: `${field} must be an array of source ids` };
+          }
+          const unknown = (value as string[]).find((s) => !knownSource(s));
+          if (unknown !== undefined) {
+            return { message: `${field} names an unknown source ${JSON.stringify(unknown)}; GET /v1/categories shows what is held, and the spec's SourceId enum lists every storable source` };
+          }
+          return value as SourceId[];
+        };
+
+        const single = body?.source;
+        if (single != null && (typeof single !== 'string' || !knownSource(single))) {
+          return error(400, 'invalid_request', `source names an unknown source ${JSON.stringify(single)}`, ctx.requestId);
+        }
+        const sources = sourceList(body?.sources, 'sources');
+        if (!Array.isArray(sources)) return error(400, 'invalid_request', sources.message, ctx.requestId);
+        const excludeSources = sourceList(body?.excludeSources, 'excludeSources');
+        if (!Array.isArray(excludeSources)) return error(400, 'invalid_request', excludeSources.message, ctx.requestId);
+
+        /*
+         * Source classes are the caller facing names for the evidence tiers,
+         * expanded to source lists HERE so the corpus never learns the class
+         * vocabulary. consumer_voice is tier C, practitioner is B,
+         * institutional is A; tier D is context and is not a class anyone
+         * asks for by name.
+         */
+        const CLASS_TIER: Record<string, EvidenceTier> = {
+          consumer_voice: 'C', practitioner: 'B', institutional: 'A',
+        };
+        let classSources: SourceId[] = [];
+        if (body?.sourceClasses != null) {
+          const classes = body.sourceClasses;
+          if (!Array.isArray(classes) || classes.some((c) => typeof c !== 'string')) {
+            return error(400, 'invalid_request', 'sourceClasses must be an array of class names', ctx.requestId);
+          }
+          const bad = (classes as string[]).find((c) => !(c in CLASS_TIER));
+          if (bad !== undefined) {
+            return error(400, 'invalid_request',
+              `sourceClasses names an unknown class ${JSON.stringify(bad)}; the classes are consumer_voice, practitioner and institutional`,
+              ctx.requestId);
+          }
+          const wanted = new Set((classes as string[]).map((c) => CLASS_TIER[c]!));
+          classSources = (Object.keys(SOURCE_TIER) as SourceId[]).filter((s) => wanted.has(SOURCE_TIER[s]));
+        }
+        /* Explicit sources and class expansions union: both are inclusion. */
+        const includeSources = [...new Set([...sources, ...classSources])];
+
+        const numberOrBad = (value: unknown, field: string): number | null | { message: string } => {
+          if (value == null) return null;
+          if (typeof value !== 'number' || !Number.isFinite(value)) {
+            return { message: `${field} must be a number` };
+          }
+          return value;
+        };
+        const minScore = numberOrBad(body?.minScore, 'minScore');
+        if (minScore !== null && typeof minScore !== 'number') return error(400, 'invalid_request', minScore.message, ctx.requestId);
+        const from = numberOrBad(body?.from, 'from');
+        if (from !== null && typeof from !== 'number') return error(400, 'invalid_request', from.message, ctx.requestId);
+        const until = numberOrBad(body?.until, 'until');
+        if (until !== null && typeof until !== 'number') return error(400, 'invalid_request', until.message, ctx.requestId);
 
         const limit = Math.min(Number(body?.limit) || 50, 500);
         const rows = await corpus.search(query, {
           limit,
           ...(typeof body?.category === 'string' ? { category: body.category } : {}),
-          ...(typeof body?.source === 'string' ? { source: body.source as SourceId } : {}),
+          ...(typeof single === 'string' ? { source: single as SourceId } : {}),
+          ...(includeSources.length ? { sources: includeSources } : {}),
+          ...(excludeSources.length ? { excludeSources } : {}),
+          ...(minScore !== null ? { minScore } : {}),
+          ...(from !== null ? { from } : {}),
+          ...(until !== null ? { until } : {}),
         });
         return {
           status: 200,

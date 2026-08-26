@@ -283,7 +283,10 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
     },
 
     async search(query: string, options: SearchOptions = {}): Promise<DocHit[]> {
-      const { category = null, limit = 200, minScore = null, source = null, from, until } = options;
+      const {
+        category = null, limit = 200, minScore = null, source = null,
+        sources = null, excludeSources = null, from, until,
+      } = options;
       const loose = ftsQuery(query);
       if (!loose) return [];
 
@@ -291,6 +294,14 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       const args: (string | number)[] = [];
       if (category) { where.push('d.category = ?'); args.push(normaliseCategory(category)); }
       if (source) { where.push('d.source = ?'); args.push(source); }
+      if (sources?.length) {
+        where.push(`d.source IN (${sources.map(() => '?').join(', ')})`);
+        args.push(...sources);
+      }
+      if (excludeSources?.length) {
+        where.push(`d.source NOT IN (${excludeSources.map(() => '?').join(', ')})`);
+        args.push(...excludeSources);
+      }
       if (minScore != null) { where.push('d.score >= ?'); args.push(minScore); }
       /* An as-of window. A record with no usable date is EXCLUDED rather than
        * assumed recent, because assuming would place undated evidence inside

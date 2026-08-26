@@ -212,6 +212,34 @@ export function runConformanceSuite(
   });
 
   /*
+   * Include and exclude lists over sources. The single `source` filter could
+   * not express the request every live evaluation session actually made,
+   * "drop sec-edgar and cpsc from this consumer question", 2026-08-26.
+   */
+  test(`${driverName}: source include and exclude lists filter, and exclusion wins`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'r1', source: 'reddit', text: 'the sizing runs small for r1' }),
+        doc({ externalId: 'h1', source: 'hackernews', text: 'the sizing runs small for h1' }),
+        doc({ externalId: 's1', source: 'sec-edgar', text: 'the sizing runs small for s1' }),
+      ], 'running shoes');
+
+      const included = await c.search('sizing', { sources: ['reddit', 'hackernews'] });
+      assert.deepEqual(included.map((h) => h.externalId).sort(), ['h1', 'r1']);
+
+      const excluded = await c.search('sizing', { excludeSources: ['sec-edgar', 'cpsc'] });
+      assert.deepEqual(excluded.map((h) => h.externalId).sort(), ['h1', 'r1']);
+
+      const both = await c.search('sizing', { sources: ['reddit', 'sec-edgar'], excludeSources: ['sec-edgar'] });
+      assert.deepEqual(both.map((h) => h.externalId), ['r1'],
+        'a source both included and excluded stays out');
+
+      const empty = await c.search('sizing', { sources: [] });
+      assert.equal(empty.length, 3, 'an empty include list means unfiltered, not nothing');
+    });
+  });
+
+  /*
    * AND first, OR as the fallback. "battery life" used to OR its words and
    * count every record that merely said "life"; when records carrying every
    * word exist, they are the answer, and when none do the measured recall

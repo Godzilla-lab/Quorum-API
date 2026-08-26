@@ -701,3 +701,98 @@ test('an open instance says no key is needed, and where to try it', async () => 
     assert.match(body.tryIt ?? '', /^\/v1\//, 'and it hands the visitor a first request to make');
   } finally { await s.close(); }
 });
+
+/* ------------------------------------------------------------------ */
+/* evidence search: filters, first covered 2026-08-26                  */
+/* ------------------------------------------------------------------ */
+
+async function search(base: string, body: Record<string, unknown>): Promise<{ status: number; body: any }> {
+  const res = await fetch(`${base}/v1/evidence/search`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+/* Three sources sharing a word, so every filter decision is visible. */
+async function seedFilterDocs(corpus: CorpusDriver): Promise<void> {
+  await corpus.addDocs([
+    { source: 'reddit', kind: 'comment', externalId: 'f-r', channel: 'r/gear', text: 'the sizing runs small says the reddit voice', score: 10, url: 'https://e.test/fr', createdUtc: 1_700_000_000 },
+    { source: 'hackernews', kind: 'comment', externalId: 'f-h', channel: 'HN thread', text: 'the sizing runs small says the practitioner', score: 3, url: 'https://e.test/fh', createdUtc: 1_710_000_000 },
+    { source: 'sec-edgar', kind: 'post', externalId: 'f-s', channel: 'Filer, Inc.', text: 'the sizing runs small says the filing', score: 0, url: 'https://e.test/fs', createdUtc: 1_720_000_000 },
+    { source: 'github', kind: 'post', externalId: 'f-g', channel: 'acme/gear', text: 'the sizing runs small says the issue tracker', score: 2, url: 'https://e.test/fg', createdUtc: 1_712_000_000 },
+    { source: 'reddit', kind: 'comment', externalId: 'f-u', channel: 'r/gear', text: 'the sizing runs small says the undated one', score: 1, url: 'https://e.test/fu', createdUtc: 0 },
+  ], 'filter bench');
+}
+
+test('excludeSources drops the named sources from the result', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    const r = await search(s.base, { query: 'sizing', category: 'filter bench', excludeSources: ['sec-edgar', 'cpsc'] });
+    assert.equal(r.status, 200);
+    const sources = new Set(r.body.records.map((x: { source: string }) => x.source));
+    assert.deepEqual([...sources].sort(), ['github', 'hackernews', 'reddit']);
+  } finally { await s.close(); }
+});
+
+test('sourceClasses maps to tiers server side, and institutional stays reachable', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    /* The classes follow the house tier table: hackernews is tier C in
+     * tiers.ts, so consumer_voice includes it; practitioner is tier B. */
+    const voice = await search(s.base, { query: 'sizing', category: 'filter bench', sourceClasses: ['consumer_voice'] });
+    assert.deepEqual(new Set(voice.body.records.map((x: { source: string }) => x.source)), new Set(['reddit', 'hackernews']));
+
+    const practitioner = await search(s.base, { query: 'sizing', category: 'filter bench', sourceClasses: ['practitioner'] });
+    assert.deepEqual(new Set(practitioner.body.records.map((x: { source: string }) => x.source)), new Set(['github']));
+
+    const institutional = await search(s.base, { query: 'sizing', category: 'filter bench', sourceClasses: ['institutional'] });
+    assert.deepEqual(new Set(institutional.body.records.map((x: { source: string }) => x.source)), new Set(['sec-edgar']));
+  } finally { await s.close(); }
+});
+
+test('an unknown source or class is a 400 naming it, never a silent empty 200', async () => {
+  const s = await live();
+  try {
+    const typo = await search(s.base, { query: 'sizing', excludeSources: ['sec-edgear'] });
+    assert.equal(typo.status, 400);
+    assert.match(typo.body.error.message, /sec-edgear/);
+
+    const single = await search(s.base, { query: 'sizing', source: 'redit' });
+    assert.equal(single.status, 400);
+    assert.match(single.body.error.message, /redit/);
+
+    const badClass = await search(s.base, { query: 'sizing', sourceClasses: ['regulatory'] });
+    assert.equal(badClass.status, 400);
+    assert.match(badClass.body.error.message, /consumer_voice, practitioner and institutional/);
+  } finally { await s.close(); }
+});
+
+test('date windows filter by author date and exclude undated records', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    const windowed = await search(s.base, { query: 'sizing', category: 'filter bench', from: 1_705_000_000, until: 1_715_000_000 });
+    assert.deepEqual(new Set(windowed.body.records.map((x: { externalId: string }) => x.externalId)), new Set(['f-h', 'f-g']));
+
+    const wide = await search(s.base, { query: 'sizing', category: 'filter bench', from: 1 });
+    const ids = windowed.status === 200 ? wide.body.records.map((x: { externalId: string }) => x.externalId) : [];
+    assert.equal(ids.includes('f-u'), false, 'a record with no date sits inside no window');
+
+    const bad = await search(s.base, { query: 'sizing', from: 'march' });
+    assert.equal(bad.status, 400);
+  } finally { await s.close(); }
+});
+
+test('minScore filters and the spec stops promising the cursor it never sent', async () => {
+  const s = await live();
+  try {
+    await seedFilterDocs(s.corpus);
+    const scored = await search(s.base, { query: 'sizing', category: 'filter bench', minScore: 5 });
+    assert.deepEqual(scored.body.records.map((x: { externalId: string }) => x.externalId), ['f-r']);
+    assert.equal(scored.body.nextCursor, null);
+  } finally { await s.close(); }
+});

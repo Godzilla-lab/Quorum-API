@@ -278,7 +278,10 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
     },
 
     async search(query: string, options: SearchOptions = {}): Promise<DocHit[]> {
-      const { category = null, limit = 200, minScore = null, source = null, from, until } = options;
+      const {
+        category = null, limit = 200, minScore = null, source = null,
+        sources = null, excludeSources = null, from, until,
+      } = options;
       const loose = toTsQuery(query);
       if (!loose) return [];
 
@@ -286,6 +289,14 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       const params: unknown[] = [loose];
       if (category) { params.push(normaliseCategory(category)); where.push(`d.category = $${params.length}`); }
       if (source) { params.push(source); where.push(`d.source = $${params.length}`); }
+      if (sources?.length) {
+        const spots = sources.map((s) => { params.push(s); return `$${params.length}`; });
+        where.push(`d.source IN (${spots.join(', ')})`);
+      }
+      if (excludeSources?.length) {
+        const spots = excludeSources.map((s) => { params.push(s); return `$${params.length}`; });
+        where.push(`d.source NOT IN (${spots.join(', ')})`);
+      }
       if (minScore != null) { params.push(minScore); where.push(`d.score >= $${params.length}`); }
       /* Same window rule as the sqlite driver, and conformance asserts they
        * agree. An undated record is excluded rather than assumed recent. */
