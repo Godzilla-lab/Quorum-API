@@ -171,12 +171,44 @@ class QuorumClient:
         return self._call("POST", "/evidence/batch", {"receiptIds": receipt_ids})
 
     def search_evidence(self, query: str, *, category: Optional[str] = None,
-                        limit: Optional[int] = None) -> Result:
+                        limit: Optional[int] = None,
+                        min_score: Optional[int] = None,
+                        from_utc: Optional[int] = None,
+                        until_utc: Optional[int] = None,
+                        sources: Optional[List[str]] = None,
+                        exclude_sources: Optional[List[str]] = None,
+                        source_classes: Optional[List[str]] = None,
+                        min_channels: Optional[int] = None,
+                        mode: Optional[str] = None) -> Result:
+        """Search held evidence, with the same filters the API takes.
+
+        Snake_case here, camelCase on the wire, same names and semantics as
+        the REST and MCP surfaces so the filter vocabulary cannot drift per
+        surface. Dates are unix seconds over when the record was WRITTEN;
+        undated records sit inside no window. mode="phrase" matches the
+        words as one ordered phrase with no any-word fallback.
+        """
         body: Dict[str, Any] = {"query": query}
         if category is not None:
             body["category"] = category
         if limit is not None:
             body["limit"] = limit
+        if min_score is not None:
+            body["minScore"] = min_score
+        if from_utc is not None:
+            body["from"] = from_utc
+        if until_utc is not None:
+            body["until"] = until_utc
+        if sources is not None:
+            body["sources"] = sources
+        if exclude_sources is not None:
+            body["excludeSources"] = exclude_sources
+        if source_classes is not None:
+            body["sourceClasses"] = source_classes
+        if min_channels is not None:
+            body["minChannels"] = min_channels
+        if mode is not None:
+            body["mode"] = mode
         return self._call("POST", "/evidence/search", body)
 
     def get_ad_evidence(self, ad_id: str) -> Result:

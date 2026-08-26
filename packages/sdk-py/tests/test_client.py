@@ -177,3 +177,28 @@ class Shapes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SearchFilters(unittest.TestCase):
+    def test_filters_map_to_the_wire_names(self):
+        transport = transport_returning(200, {"records": []})
+        client = QuorumClient("https://api.example", transport=transport)
+        client.search_evidence(
+            "sizing", category="running shoes", exclude_sources=["sec-edgar", "cpsc"],
+            source_classes=["consumer_voice"], from_utc=1, until_utc=2,
+            min_score=3, min_channels=2, mode="phrase",
+        )
+        sent = json.loads(transport.calls[0]["body"].decode("utf-8"))
+        self.assertEqual(sent, {
+            "query": "sizing", "category": "running shoes",
+            "excludeSources": ["sec-edgar", "cpsc"],
+            "sourceClasses": ["consumer_voice"],
+            "from": 1, "until": 2, "minScore": 3, "minChannels": 2,
+            "mode": "phrase",
+        }, "snake_case in, camelCase on the wire, absent options absent")
+
+    def test_bare_search_sends_only_the_query(self):
+        transport = transport_returning(200, {"records": []})
+        QuorumClient("https://api.example", transport=transport).search_evidence("sizing")
+        sent = json.loads(transport.calls[0]["body"].decode("utf-8"))
+        self.assertEqual(sent, {"query": "sizing"})
