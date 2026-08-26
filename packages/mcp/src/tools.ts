@@ -78,6 +78,44 @@ function concentrationWarning(records: number, channels: number): string | null 
     + 'Weigh the channel count, not the record count.';
 }
 
+/* Plain iterative Levenshtein. Two rows, no dependency, and small inputs:
+ * category names run a few dozen characters at most. */
+function editDistance(a: string, b: string): number {
+  if (a === b) return 0;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(
+        prev[j]! + 1,
+        row[j - 1]! + 1,
+        prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    prev = row;
+  }
+  return prev[b.length]!;
+}
+
+/*
+ * Near misses for a category nobody holds. Spelling variants (jewellery for
+ * jewelry) sit within edit distance 2, and multi word slugs share a token
+ * (running shoe finds running shoes). Deliberately suggestions rather than
+ * silent aliasing: resolving a name the corpus does not hold would fabricate
+ * a category identity, so the caller is told what IS held and chooses.
+ */
+function closestCategories(asked: string, held: readonly string[]): string[] {
+  const wanted = asked.toLowerCase().trim();
+  const tokens = new Set(wanted.split(/\s+/).filter((t) => t.length >= 3));
+  return held
+    .filter((name) => {
+      const lower = name.toLowerCase();
+      if (editDistance(wanted, lower) <= 2) return true;
+      return lower.split(/\s+/).some((t) => tokens.has(t));
+    })
+    .slice(0, 3);
+}
+
 function corroborationLine(c: Corroboration, atLeast: boolean): string {
   /* A full scan window means the true counts may be higher, never lower, so
    * the floor is stated in the output itself rather than left to a schema
@@ -241,10 +279,19 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
          * ABSENCE IS AN ANSWER AND IS SAID AS ONE. "No records" invites a model
          * to conclude the problem does not exist. It means we hold nothing.
          */
+        /* A miss on a category the caller typed may be a near miss on one we
+         * hold, and saying so costs one listing read. */
+        let closest = '';
+        if (category) {
+          const held = (await corpus.listCategories()).map((l) => l.category);
+          const near = closestCategories(category, held);
+          if (near.length) closest = `\n\nClosest held: ${near.join(', ')}.`;
+        }
         return `No records held for ${JSON.stringify(query)}`
           + `${category ? ` in ${JSON.stringify(category)}` : ''}.\n\n`
           + 'That means the corpus holds nothing on it, which is not evidence that it is fine. '
-          + 'Check `category_warmth` to see whether this category has been harvested at all.';
+          + 'Check `category_warmth` to see whether this category has been harvested at all.'
+          + closest;
       }
 
       /* The same stance split every report applies: a record saying "no
@@ -435,8 +482,12 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
           : 'This server is read only and cannot start one. A keyed `POST /v1/reports` at the '
             + 'hosted API runs the harvest (minutes of throttled retrieval, instant ever after), '
             + 'or a local MCP started with `QUORUM_MCP_RESEARCH=1` exposes the research tool.';
+        const held = (await corpus.listCategories()).map((l) => l.category);
+        const near = closestCategories(category, held);
+        const closest = near.length ? `\n\nClosest held: ${near.join(', ')}.` : '';
         return `Nothing held for ${JSON.stringify(category)}.\n\n${how}\n\n`
-          + 'Call this tool with no category to list what is already held.';
+          + 'Call this tool with no category to list what is already held.'
+          + closest;
       }
       const age = stats.ageDays === null ? 'unknown age' : `last harvested ${stats.ageDays.toFixed(1)} days ago`;
       /* Ads are their own leg and warmth never implied them: a warm category

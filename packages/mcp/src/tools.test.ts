@@ -480,3 +480,27 @@ test('the category listing shows ad coverage, so compare_formats needs no probin
   assert.match(single, /No ads held/);
   await corpus.close();
 });
+
+/*
+ * Near misses suggest rather than silently alias: resolving a name the corpus
+ * does not hold would fabricate a category identity. An outside evaluation
+ * asked for jewelry, then jewellery, and got two bare empties, 2026-08-26.
+ */
+test('a near miss category suggests the closest held names', async () => {
+  const { call, corpus } = await tools();
+  await corpus.addDocs([doc('a lovely pendant, well made', 'r/jewelry')], 'jewellery');
+
+  const spelling = await call('category_warmth', { category: 'jewelry' });
+  assert.match(spelling, /Nothing held for "jewelry"/);
+  assert.match(spelling, /Closest held: jewellery/);
+
+  const sharedToken = await call('category_warmth', { category: 'running shoe' });
+  assert.match(sharedToken, /Closest held: running shoes/);
+
+  const distant = await call('category_warmth', { category: 'submarine parts' });
+  assert.doesNotMatch(distant, /Closest held/, 'nothing close means no guess');
+
+  const searchMiss = await call('search_evidence', { query: 'tarnish', category: 'jewelry' });
+  assert.match(searchMiss, /Closest held: jewellery/, 'search misses point the same way');
+  await corpus.close();
+});
