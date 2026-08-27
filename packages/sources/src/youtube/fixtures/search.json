@@ -1,0 +1,352 @@
+{
+  "kind": "youtube#searchListResponse",
+  "etag": "jPTsO8uEggtJK50zT0X4xKVV19I",
+  "nextPageToken": "CAoQAA",
+  "regionCode": "NG",
+  "pageInfo": {
+    "totalResults": 1000000,
+    "resultsPerPage": 10
+  },
+  "items": [
+    {
+      "kind": "youtube#searchResult",
+      "etag": "ZRGkHs-NvpFlO_rMT4OSwBqhtbU",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "hg-SAAIMOTw"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-19T12:22:54Z",
+        "channelId": "UCOBM9FasII4dKbyE_HKkbjw",
+        "title": "Our Favourite Running Shoes 2026 | Tom&#39;s full list of best running shoes this year",
+        "description": "In our Best Running Shoes 2026 video, we cover the Run Testers' top three picks across five different categories, but there are ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/hg-SAAIMOTw/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/hg-SAAIMOTw/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/hg-SAAIMOTw/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "The Run Testers",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-08-19T12:22:54Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "vnEfUPSgU1JslNV2sU6lbBK1hpk",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "XIHeu0gEFwI"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-27T06:00:32Z",
+        "channelId": "UCcPagJur6wcbV5kej6mwG_A",
+        "title": "FINISHED?! ASICS MEGA LONG TERM REVIEW (400 Mile Megablast 200 Mile Sky Tokyo 100 Mile Novablast 6)",
+        "description": "FINISHED?! ASICS MEGA LONG TERM REVIEW (400 Mile Megablast 200 Mile Sky Tokyo 100 Mile Novablast 6) - Welcome back ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/XIHeu0gEFwI/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/XIHeu0gEFwI/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/XIHeu0gEFwI/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "The FOD Runner",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-08-27T06:00:32Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "gUNGIzV2M7Uh8TxmEyJB0YC9BNY",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "sPCVFolFc6E"
+      },
+      "snippet": {
+        "publishedAt": "2026-01-19T17:59:02Z",
+        "channelId": "UCIpT-JgoOI0HpTCdWE_qH2Q",
+        "title": "The 5 Best Daily Running Shoes You Can Buy Right Now | Runna Recommends",
+        "description": "The best daily running shoes can make or break your training. In this video, Michelle reviews and compares Runna's top 5 daily ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/sPCVFolFc6E/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/sPCVFolFc6E/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/sPCVFolFc6E/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Runna TV",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-01-19T17:59:02Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "iXXieW2_ynCQVJrf_NRLOLFou6Q",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "MFpzCcf6Q9U"
+      },
+      "snippet": {
+        "publishedAt": "2025-06-02T15:59:42Z",
+        "channelId": "UCZPqG0yh_xPm2AyLjffbDvw",
+        "title": "The Best Running Shoe From Every Brand (100% honest review)",
+        "description": "If you enjoyed the video, please like, comment and subscribe! Thank you for watching! Save 10% site wide on training plans, hats, ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/MFpzCcf6Q9U/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/MFpzCcf6Q9U/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/MFpzCcf6Q9U/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Ben Parkes",
+        "liveBroadcastContent": "none",
+        "publishTime": "2025-06-02T15:59:42Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "iCj8fReNaOes5EsAcjRC5tEErBs",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "GDL5GVlpuko"
+      },
+      "snippet": {
+        "publishedAt": "2025-11-09T17:00:32Z",
+        "channelId": "UCZPqG0yh_xPm2AyLjffbDvw",
+        "title": "My Complete Guide To Running Shoes! (Everything You Need To Know)",
+        "description": "If you enjoyed the video, please like, comment and subscribe! Thank you for watching! Save 10% site wide on training plans, hats, ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/GDL5GVlpuko/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/GDL5GVlpuko/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/GDL5GVlpuko/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Ben Parkes",
+        "liveBroadcastContent": "none",
+        "publishTime": "2025-11-09T17:00:32Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "EHS8A8XOEzZ6iiVrxAmKhOuCKY0",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "E1X7qsE4k0A"
+      },
+      "snippet": {
+        "publishedAt": "2026-07-03T14:43:26Z",
+        "channelId": "UCq1usBENK02N2EowT6qAIsQ",
+        "title": "I Bought The Asics Novablast 6, here’s my 100% honest review!",
+        "description": "If you enjoyed the video, please like, comment and subscribe! Thank you for watching! Save 10% site wide on training plans, hats, ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/E1X7qsE4k0A/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/E1X7qsE4k0A/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/E1X7qsE4k0A/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Ben Parkes - Road Running Reviews",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-07-03T14:43:26Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "ab-B6TvCia0iFz2pLUrCogvkueE",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "PqYEIm3Wd-4"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-13T16:16:27Z",
+        "channelId": "UCZPqG0yh_xPm2AyLjffbDvw",
+        "title": "I bought the all new Adidas Hyperboost RUN - here’s my 100% honest review!",
+        "description": "If you enjoyed the video, please like, comment and subscribe! Thank you for watching! Save 10% site wide on training plans, hats, ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/PqYEIm3Wd-4/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/PqYEIm3Wd-4/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/PqYEIm3Wd-4/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Ben Parkes",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-08-13T16:16:27Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "xatU6SpI4JyIB_lSqU2xIK4UsyE",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "xKZZq6q0EFI"
+      },
+      "snippet": {
+        "publishedAt": "2026-04-01T16:07:06Z",
+        "channelId": "UCOBM9FasII4dKbyE_HKkbjw",
+        "title": "The Best Daily Running Shoes 2026 | Our top picks from Adidas, Asics, Nike, New Balance and more",
+        "description": "A good daily trainer is the backbone of any runner's shoe rotation, and might be the only shoe they own in fact. It's a versatile ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/xKZZq6q0EFI/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/xKZZq6q0EFI/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/xKZZq6q0EFI/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "The Run Testers",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-04-01T16:07:06Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "aebOAk12lq3pjk-rKwFpsYRpvLM",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "9qv6rh34rXU"
+      },
+      "snippet": {
+        "publishedAt": "2026-06-14T16:00:25Z",
+        "channelId": "UCZPqG0yh_xPm2AyLjffbDvw",
+        "title": "The Best Running Shoe From Every Brand in 2026!",
+        "description": "If you enjoyed the video, please like, comment and subscribe! Thank you for watching! Save 10% site wide on training plans, hats, ...",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/9qv6rh34rXU/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/9qv6rh34rXU/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/9qv6rh34rXU/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "Ben Parkes",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-06-14T16:00:25Z"
+      }
+    },
+    {
+      "kind": "youtube#searchResult",
+      "etag": "V7-RXnyhbI-AuhjNdh49rrfRfCc",
+      "id": {
+        "kind": "youtube#video",
+        "videoId": "K92A0IUYo4g"
+      },
+      "snippet": {
+        "publishedAt": "2026-08-25T20:00:11Z",
+        "channelId": "UC_PK_BToddrwhaCswFEuxDg",
+        "title": "REVIEW ESPECIAL: FILA RACER SPEEDZONE 2 VS. OLYMPIKUS CORRE 5",
+        "description": "",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/K92A0IUYo4g/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/K92A0IUYo4g/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/K92A0IUYo4g/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        },
+        "channelTitle": "TÊNIS1MINUTO",
+        "liveBroadcastContent": "none",
+        "publishTime": "2026-08-25T20:00:11Z"
+      }
+    }
+  ]
+}

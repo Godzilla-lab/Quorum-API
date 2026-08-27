@@ -191,13 +191,16 @@ database restart, which is not a thing worth hand writing.
 
 No key is required for anything. Reddit through a public archive, Hacker News,
 the App Store and four government safety archives are all free and keyless. Keys
-only ever ADD sources, and a missing one degrades a run rather than failing it.
+only ever ADD sources (YouTube comments with a free API key, Amazon reviews and
+the Meta ad library through Apify), and a missing one degrades a run rather
+than failing it.
 
 <details>
 <summary><strong>Environment variables</strong>, all optional. Put them in a gitignored <code>.env</code> at the repo root.</summary>
 
 | | |
 |---|---|
+| `QUORUM_YOUTUBE_API_KEY` | A free [YouTube Data API v3](https://developers.google.com/youtube/v3/getting-started) key. Comments under review videos join the voice tier; absent, the source reports itself unconfigured and the run proceeds without it. Costs nothing: the free daily quota covers dozens of runs. |
 | `QUORUM_CONTACT_EMAIL` | Not a key. The SEC requires a User-Agent naming who is calling and returns 403 without one, so `sec-edgar` reports itself unconfigured until this is set. A role address outlives whoever set it up. |
 | `OPENROUTER_API_KEY` | Subject expansion, `--synthesise` and `--read-images`. All three are off by default, and the counts never come from a model, so the deterministic report is identical without it. |
 | `APIFY_TOKEN` | The two metered legs: the Meta ad library and Amazon reviews, both through the same Apify account. Every call charges the cost meter and lands on the report's bill. Absent, both legs are skipped, exactly as `--no-ads` does for ads. |
@@ -800,6 +803,9 @@ This runs on archives other people maintain, most of them for free:
   recall data is what makes attested evidence possible
 - [SEC EDGAR](https://www.sec.gov/edgar), which asks callers to identify
   themselves and is the reason `QUORUM_CONTACT_EMAIL` exists
+- The [YouTube Data API](https://developers.google.com/youtube/v3), used with a
+  free key as documented: comments under review videos are buyers talking, at
+  one quota unit per hundred comments against a 10,000 unit free day
 - [Apify](https://apify.com/), the one paid vendor, carrying both metered legs:
   the Meta Ad Library scraper and Amazon product reviews. The reviews leg reads
   only what Amazon's public product page shows a logged out visitor, plans

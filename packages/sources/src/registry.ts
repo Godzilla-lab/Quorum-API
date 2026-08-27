@@ -26,16 +26,18 @@ import { createMetaAdsApifySource } from './meta-ads/apify.ts';
 import { createNhtsaSource } from './nhtsa/index.ts';
 import { createOpenFdaSource } from './openfda/index.ts';
 import { createSecEdgarSource } from './sec-edgar/index.ts';
+import { createYoutubeSource } from './youtube/index.ts';
 
 /*
  * Every record source a run tries, in order. All free and keyless except
- * `amazon`, which is metered through the Apify account: it reports itself
- * unconfigured without APIFY_TOKEN, plans nothing unless the subject is an
- * Amazon product, and checks the spend cap before every call, so its
- * presence here costs a keyless run exactly nothing.
+ * two: `youtube` costs nothing but needs a free QUORUM_YOUTUBE_API_KEY for
+ * the official Data API, and `amazon` is metered through the Apify account.
+ * Both report themselves unconfigured without their key, amazon plans
+ * nothing unless the subject is an Amazon product and checks the spend cap
+ * before every call, so their presence costs a keyless run exactly nothing.
  */
 export const SOURCE_IDS = [
-  'reddit', 'hackernews', 'github', 'appstore', 'amazon', 'cpsc', 'openfda', 'nhtsa', 'sec-edgar', 'eu-safety-gate',
+  'reddit', 'hackernews', 'github', 'appstore', 'youtube', 'amazon', 'cpsc', 'openfda', 'nhtsa', 'sec-edgar', 'eu-safety-gate',
 ] as const;
 
 /*
@@ -57,6 +59,7 @@ export function makeSource(id: string): Source {
     case 'openfda': return createOpenFdaSource();
     case 'nhtsa': return createNhtsaSource();
     case 'appstore': return createAppStoreSource();
+    case 'youtube': return createYoutubeSource();
     case 'amazon': return createAmazonReviewsSource();
     case 'sec-edgar': return createSecEdgarSource();
     case 'eu-safety-gate': return createEuSafetyGateSource();
