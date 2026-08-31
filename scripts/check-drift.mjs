@@ -195,7 +195,17 @@ const LIVE_CHECKS = [
     /* The parser reads the label of each of these, and `im:rating` is the star
      * rating that the score kind table renders as stars rather than points. */
     contract: { required: ['id.label', 'title.label', 'content.label', 'im:rating.label'] },
-    fetch: async () => (await getJson('https://itunes.apple.com/us/rss/customerreviews/id=1232780281/sortBy=mostRecent/page=1/json')).feed.entry,
+    fetch: async () => {
+      const feed = (await getJson('https://itunes.apple.com/us/rss/customerreviews/id=1232780281/sortBy=mostRecent/page=1/json')).feed;
+      /*
+       * Measured 2026-08-31, runs 33391515552 and 33394150005: from a GitHub
+       * runner IP Apple serves this feed with no `entry` array while the same
+       * URL returns 50 rows from a residential IP. An empty feed carries no
+       * shape to check, so it reports as unreachable rather than drifted.
+       */
+      if (!feed?.entry) throw new Error('feed has no entries from this network');
+      return feed.entry;
+    },
   },
   {
     source: 'cpsc',
@@ -206,7 +216,19 @@ const LIVE_CHECKS = [
      * fail on a healthy endpoint.
      */
     contract: { required: ['RecallNumber', 'RecallDate', 'Title', 'Description', 'URL', 'Products', 'Hazards'] },
-    fetch: () => getJson('https://www.saferproducts.gov/RestWebServices/Recall?format=json&ProductName=treadmill'),
+    fetch: async () => {
+      const rows = await getJson('https://www.saferproducts.gov/RestWebServices/Recall?format=json&ProductName=treadmill');
+      /*
+       * Measured 2026-08-31, runs 33391515552 and 33394150005: the endpoint can
+       * answer 200 with a single error record, Title "Error retrieving Recalls:
+       * The underlying provider failed on Open." and every real field null. A
+       * vendor error is a vendor being down, not drift.
+       */
+      if (Array.isArray(rows) && rows.length === 1 && rows[0]?.RecallNumber == null && /^Error retrieving/.test(rows[0]?.Title ?? '')) {
+        throw new Error(`vendor error body: ${rows[0].Title}`);
+      }
+      return rows;
+    },
   },
 ];
 
