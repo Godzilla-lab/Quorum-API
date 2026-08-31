@@ -53,6 +53,17 @@ const has = (row, path) => {
 
 const anyHas = (rows, path) => rows.some((r) => has(r, path));
 
+/*
+ * A failure without the body that caused it cannot be classified from the CI
+ * log, and this job's failures are read in exactly that log. Run 33391515552
+ * failed on appstore and cpsc from a runner IP while the same checks passed
+ * locally, and nothing in the output said what the vendors had returned.
+ */
+const peek = (row) => {
+  const body = JSON.stringify(row) ?? String(row);
+  return body.length > 300 ? `${body.slice(0, 300)}...` : body;
+};
+
 function checkContract(source, rows, contract) {
   if (!rows.length) { record('FAIL', source, 'returned no rows at all'); return; }
 
@@ -65,7 +76,7 @@ function checkContract(source, rows, contract) {
   const appeared = (contract.absent ?? []).filter((f) => anyHas(rows, f));
 
   if (missing.length) {
-    record('FAIL', source, `no row carries ${missing.join(', ')}, which the parser reads`);
+    record('FAIL', source, `no row carries ${missing.join(', ')}, which the parser reads. First row: ${peek(rows[0])}`);
   } else if (appeared.length) {
     record('WARN', source, `${appeared.join(', ')} now present, and the adapter assumes it is absent`);
   } else {
