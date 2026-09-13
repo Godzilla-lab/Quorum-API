@@ -35,9 +35,22 @@ import { createYoutubeSource } from './youtube/index.ts';
  * Both report themselves unconfigured without their key, amazon plans
  * nothing unless the subject is an Amazon product and checks the spend cap
  * before every call, so their presence costs a keyless run exactly nothing.
+ *
+ * THE ORDER IS FASTEST AND RICHEST FIRST, because sources run one after
+ * another and records are searchable the moment they are written, so the
+ * order decides how soon a caller polling a running report sees anything.
+ * Measured 2026-09-13 over 37 hosted cold runs stored in report_snapshots,
+ * average seconds and records written per source: hackernews 4s/66,
+ * appstore 2s/22, youtube 12s/415, github 27s/27, reddit 92s/162. Reddit used
+ * to run first, so the first useful batch landed at a median 105s; with it
+ * fifth, a hundred records exist inside 20s at no extra cost to any archive.
+ * The attested tier follows (cpsc 2s/3, sec-edgar 16s/12, openfda 63s/4,
+ * nhtsa 9s/0, eu-safety-gate 11s/0): low volume by nature, and openfda is
+ * the second slowest source in the run for the fewest records. Amazon last
+ * because it plans nothing without an ASIN and costs 0s when it does not.
  */
 export const SOURCE_IDS = [
-  'reddit', 'hackernews', 'github', 'appstore', 'youtube', 'amazon', 'cpsc', 'openfda', 'nhtsa', 'sec-edgar', 'eu-safety-gate',
+  'hackernews', 'appstore', 'youtube', 'github', 'reddit', 'cpsc', 'sec-edgar', 'openfda', 'nhtsa', 'eu-safety-gate', 'amazon',
 ] as const;
 
 /*

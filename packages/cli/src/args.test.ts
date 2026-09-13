@@ -94,7 +94,8 @@ test('an unknown option names itself', () => {
 test('an unknown source is rejected and the available ones are listed', () => {
   const message = usageError(['x', '--sources', 'reddit,twitter']);
   assert.match(message, /twitter/);
-  assert.match(message, /reddit, hackernews/);
+  /* The listing follows the registry order, fastest source first. */
+  assert.match(message, /hackernews, appstore/);
 });
 
 test('numbers that are not numbers are rejected', () => {
