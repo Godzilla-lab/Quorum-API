@@ -504,3 +504,66 @@ test('a near miss category suggests the closest held names', async () => {
   assert.match(searchMiss, /Closest held: jewellery/, 'search misses point the same way');
   await corpus.close();
 });
+
+/* ------------------------------------------------------------------ */
+/* a harvest in progress                                               */
+/* ------------------------------------------------------------------ */
+
+test('the read tools say a harvest is in progress rather than "nothing held"', async () => {
+  const corpus = await corpusWith();
+  const list = createTools({
+    corpus,
+    harvestInFlight: (subject) => subject === 'yoga mat' ? { status: 'running', startedAt: Date.now() - 40_000 } : null,
+  });
+  const call = (name: string, args: Record<string, unknown>) => list.find((t) => t.name === name)!.run(args);
+  try {
+    const cold = await call('category_warmth', { category: 'yoga mat' });
+    assert.match(cold, /Nothing held yet for "yoga mat"/);
+    assert.match(cold, /in progress .*started \d+s ago/);
+    assert.match(cold, /ask again in about 30 seconds/);
+    assert.doesNotMatch(cold, /cannot start one/, 'the dead end copy is gone while a run is live');
+
+    const searched = await call('search_evidence', { query: 'grip', category: 'yoga mat' });
+    assert.match(searched, /No records held/);
+    assert.match(searched, /in progress/);
+
+    const held = await call('category_warmth', { category: 'running shoes' });
+    assert.doesNotMatch(held, /in progress/, 'a category with no run says nothing about one');
+  } finally { await corpus.close(); }
+});
+
+test('the read tools append the in progress line to real results, so a growing count is not read as final', async () => {
+  const corpus = await corpusWith();
+  const list = createTools({
+    corpus,
+    harvestInFlight: () => ({ status: 'queued', startedAt: null }),
+  });
+  const call = (name: string, args: Record<string, unknown>) => list.find((t) => t.name === name)!.run(args);
+  try {
+    const warmth = await call('category_warmth', { category: 'running shoes' });
+    assert.match(warmth, /4 records across/);
+    assert.match(warmth, /in progress .*queued, not started yet/);
+    const searched = await call('search_evidence', { query: 'sizing', category: 'running shoes' });
+    assert.match(searched, /in progress/);
+    assert.match(searched, /Resolve any id/);
+  } finally { await corpus.close(); }
+});
+
+test('startResearch registers research_product as a tool that returns at once', async () => {
+  const corpus = await corpusWith();
+  const started: string[] = [];
+  const list = createTools({
+    corpus,
+    startResearch: async (subject, terms) => { started.push(`${subject}|${terms.join(',')}`); return `Started a harvest for ${subject}`; },
+  });
+  try {
+    assert.equal(list[0]?.name, 'research_product', 'it leads, as the blocking one does');
+    assert.match(list[0]!.description, /RETURNS AT ONCE/);
+    assert.equal(list[0]!.annotations?.readOnlyHint, false);
+    const reply = await list[0]!.run({ subject: 'yoga mat', terms: ['grip', ' '] });
+    assert.equal(reply, 'Started a harvest for yoga mat');
+    assert.deepEqual(started, ['yoga mat|grip']);
+    const warmth = await list.find((t) => t.name === 'category_warmth')!.run({ category: 'yoga mat' });
+    assert.match(warmth, /Call `research_product` to start one: it returns at once/);
+  } finally { await corpus.close(); }
+});

@@ -159,10 +159,39 @@ export interface ToolDeps {
    * an agent should not be able to start one by accident.
    */
   research?: (subject: string, terms: string[]) => Promise<string>;
+  /*
+   * Starts a harvest and returns at once, on a server that runs a queue. The
+   * string is what the agent reads: what started, what is held now, and when
+   * to ask again. `research` wins when both are given, because a blocking
+   * report is the fuller answer where one can be had.
+   */
+  startResearch?: (subject: string, terms: string[]) => Promise<string>;
+  /*
+   * Whether a harvest is queued or running for this subject right now, so the
+   * read tools can say their counts are still growing, rather than let a
+   * caller mistake a run at minute one for a category nobody holds.
+   */
+  harvestInFlight?: (subject: string) => { status: 'queued' | 'running'; startedAt: number | null } | null;
 }
 
 export function createTools(deps: ToolDeps): ToolDefinition[] {
   const { corpus } = deps;
+
+  /*
+   * One sentence the read tools append while a harvest runs. Records are
+   * written as they arrive, so a count read at minute one is true and small;
+   * the sentence is what stops it being read as final.
+   */
+  const inProgress = (subject: string): string | null => {
+    const h = deps.harvestInFlight?.(subject);
+    if (!h) return null;
+    const since = h.startedAt === null
+      ? 'queued, not started yet'
+      : `started ${Math.max(0, Math.round((Date.now() - h.startedAt) / 1000))}s ago`;
+    return `A harvest is in progress for ${JSON.stringify(subject)} (${since}). Records are written as `
+      + 'they arrive, so the counts here grow on every call; ask again in about 30 seconds. Every '
+      + 'receipt shown is already a real record.';
+  };
 
   const searchEvidence: ToolDefinition = {
     name: 'search_evidence',
@@ -287,8 +316,10 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
           const near = closestCategories(category, held);
           if (near.length) closest = `\n\nClosest held: ${near.join(', ')}.`;
         }
+        const progress = category ? inProgress(category) : null;
         return `No records held for ${JSON.stringify(query)}`
           + `${category ? ` in ${JSON.stringify(category)}` : ''}.\n\n`
+          + (progress ? `${progress}\n\n` : '')
           + 'That means the corpus holds nothing on it, which is not evidence that it is fine. '
           + 'Check `category_warmth` to see whether this category has been harvested at all.'
           + closest;
@@ -343,6 +374,11 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
         if (c.refuting.receiptIds.length > LISTED_IDS) {
           out.push(`...and ${c.refuting.receiptIds.length - LISTED_IDS} more.`);
         }
+        out.push('');
+      }
+      const progress = category ? inProgress(category) : null;
+      if (progress) {
+        out.push(progress);
         out.push('');
       }
       out.push('Resolve any id with `get_receipt` to read the whole record.');
@@ -469,6 +505,8 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
       const stats = await corpus.categoryStats(category);
 
       if (!stats.docs) {
+        const progress = inProgress(category);
+        if (progress) return `Nothing held yet for ${JSON.stringify(category)}.\n\n${progress}`;
         /*
          * THE COPY NAMES A DOOR THE CALLER CAN ACTUALLY OPEN. The earlier
          * text described a cold run as an available action, and on the read
@@ -479,9 +517,13 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
         const how = deps.research
           ? 'Call `research_product` to run it: minutes of throttled retrieval against upstream '
             + 'archives, worth doing once, and instant every time after.'
-          : 'This server is read only and cannot start one. A keyed `POST /v1/reports` at the '
-            + 'hosted API runs the harvest (minutes of throttled retrieval, instant ever after), '
-            + 'or a local MCP started with `QUORUM_MCP_RESEARCH=1` exposes the research tool.';
+          : deps.startResearch
+            ? 'Call `research_product` to start one: it returns at once, the first records land '
+              + 'within a minute, and a full harvest takes minutes. Call this tool or `search_evidence` '
+              + 'again to watch it grow.'
+            : 'This server is read only and cannot start one. A keyed `POST /v1/reports` at the '
+              + 'hosted API runs the harvest (minutes of throttled retrieval, instant ever after), '
+              + 'or a local MCP started with `QUORUM_MCP_RESEARCH=1` exposes the research tool.';
         const held = (await corpus.listCategories()).map((l) => l.category);
         const near = closestCategories(category, held);
         const closest = near.length ? `\n\nClosest held: ${near.join(', ')}.` : '';
@@ -499,13 +541,15 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
         ? `${stats.ads} distinct ads held, so compare_formats has material here.`
         : 'No ads held: records cover conversation only, and compare_formats has nothing to compare yet.';
       const concentrated = concentrationWarning(stats.docs, stats.channels);
+      const progress = inProgress(category);
       return `## ${category}\n\n`
         + `${stats.docs} records across ${stats.channels} channels, ${age}. ${adsLine}\n\n`
         + (concentrated ? `${concentrated}\n\n` : '')
         + (stats.warm
           ? '**Warm.** Answering from this costs no upstream requests and returns in well under a second.'
           : '**Cold.** Held records are usable, but a fresh report would retrieve again, '
-            + 'which takes minutes and puts load on volunteer archives.');
+            + 'which takes minutes and puts load on volunteer archives.')
+        + (progress ? `\n\n${progress}` : '');
     },
   };
 
@@ -584,6 +628,47 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
           ? raw.filter((t): t is string => typeof t === 'string' && t.trim().length > 0).map((t) => t.trim())
           : [];
         return await research(subject, terms);
+      },
+    });
+  } else if (deps.startResearch) {
+    /*
+     * THE SAME NAME, A DIFFERENT PROMISE. On a server with a queue the tool
+     * starts the harvest and returns at once, because an agent that is told
+     * "come back in 15 minutes" does not, and one told "this server cannot
+     * start one" has nothing at all. Records are searchable as they land,
+     * so the read tools carry the answer while the run continues.
+     */
+    const start = deps.startResearch;
+    tools.unshift({
+      name: 'research_product',
+      annotations: { title: 'Start a harvest', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+      description:
+        'Start collecting evidence on a product or topic from public sources. RETURNS AT ONCE: the '
+        + 'harvest runs in the background, the first records land within a minute, and a full run '
+        + 'takes minutes. Then call `search_evidence` or `category_warmth` for the same subject '
+        + 'after about 30 seconds and keep calling while the counts grow; stop when they stop. Every '
+        + 'receipt returned along the way is already a real record. Calling this twice for one '
+        + 'subject joins the same run rather than starting another.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          subject: { type: 'string', description: 'A product name, a topic, or a product URL.' },
+          terms: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'What to ask about: single concepts like "sizing", "durability". Optional.',
+          },
+        },
+        required: ['subject'],
+      },
+      async run(args) {
+        const subject = str(args['subject']);
+        if (!subject) return 'No subject given.';
+        const raw = args['terms'];
+        const terms = Array.isArray(raw)
+          ? raw.filter((t): t is string => typeof t === 'string' && t.trim().length > 0).map((t) => t.trim())
+          : [];
+        return await start(subject, terms);
       },
     });
   }

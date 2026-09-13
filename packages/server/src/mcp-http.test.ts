@@ -13,9 +13,16 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import { openSqliteCorpus } from '@quorum/corpus';
 import { createReceiptsServer, hashKey } from './http.ts';
+import { createJobQueue, type RunOutcome } from './jobs.ts';
 import { createQuotas } from './quotas.ts';
 
-async function live() {
+/*
+ * With a queue, research_product exists and starts a harvest. The runner is
+ * a promise the test never resolves, as in http.test.ts, so "in progress" is
+ * a state the test controls rather than a race; `instant: true` swaps in a
+ * runner that finishes on its own, for the hourly cap.
+ */
+async function live(over: { withQueue?: boolean; instant?: boolean } = {}) {
   const corpus = openSqliteCorpus({ path: ':memory:' });
   await corpus.addDocs([
     { source: 'reddit', kind: 'comment', externalId: 'm1', channel: 'r/running', text: 'the sizing on these runs narrow, order half a size up', score: 5, url: 'https://e.test/m1', createdUtc: 1_700_000_000 },
@@ -24,24 +31,49 @@ async function live() {
   ], 'shoes');
   const ids = (await corpus.byCategory('shoes')).map((r) => r.receiptId);
 
+  const outcome = (subject: string): RunOutcome => ({
+    subject: { title: subject }, category: subject, subjectResolved: false,
+    retrieval: { totalWritten: 0 }, warmth: { docs: 0 }, degraded: [], cost: { totalUsd: 0 },
+  });
+  const queue = over.withQueue
+    ? createJobQueue({
+      runReport: async (request) => over.instant
+        ? outcome(request.subject)
+        : new Promise<RunOutcome>(() => { /* held open for the test's lifetime */ }),
+      claimsFor: async () => ({
+        findings: [], contested: [], refuted: [], weakSignals: [], rejected: [],
+        sufficiency: { verdict: 'sufficient' }, receiptCheck: { cited: 0, resolved: 0, unresolved: [] },
+        trends: [], voice: [], themes: [],
+      }),
+    })
+    : undefined;
+
   const server = createReceiptsServer({
     corpus,
     quotas: createQuotas(),
     /* Keyed on purpose: the whole point under test is the /mcp carve out. */
     keyHashes: new Map([[hashKey('secret-key'), 'key-1']]),
+    ...(queue ? { queue } : {}),
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
 
-  const rpc = (message: unknown) => fetch(`http://127.0.0.1:${port}/mcp`, {
+  const rpc = (message: unknown, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${port}/mcp`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(message),
   });
+  const call = async (name: string, args: Record<string, unknown>, headers: Record<string, string> = {}): Promise<string> => {
+    const res = await rpc({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }, headers);
+    const body = await res.json() as { result?: { content: { text: string }[] }; error?: { message: string } };
+    if (body.error) throw new Error(body.error.message);
+    return body.result!.content[0]!.text;
+  };
 
   return {
-    base: `http://127.0.0.1:${port}`, ids, rpc,
+    base: `http://127.0.0.1:${port}`, ids, rpc, call,
     close: async () => {
+      queue?.shutdown();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await corpus.close();
     },
@@ -72,7 +104,7 @@ test('a notification gets a bodiless 202', async () => {
   } finally { await s.close(); }
 });
 
-test('tools/list names the four read only tools and never the research tool', async () => {
+test('tools/list names the four read only tools and, without a queue, no research tool', async () => {
   const s = await live();
   try {
     const res = await s.rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
@@ -142,5 +174,68 @@ test('GET /mcp is 405 with the allowed verb named', async () => {
     const res = await fetch(`${s.base}/mcp`);
     assert.equal(res.status, 405);
     assert.equal(res.headers.get('allow'), 'POST');
+  } finally { await s.close(); }
+});
+
+/* ------------------------------------------------------------------ */
+/* starting a harvest from the door                                    */
+/* ------------------------------------------------------------------ */
+
+test('WITH A QUEUE, research_product LEADS THE LIST AND RETURNS AT ONCE', async () => {
+  const s = await live({ withQueue: true });
+  try {
+    const res = await s.rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    const body = await res.json() as { result: { tools: { name: string; description: string }[] } };
+    assert.equal(body.result.tools.length, 5);
+    assert.equal(body.result.tools[0]?.name, 'research_product');
+    assert.match(body.result.tools[0]!.description, /RETURNS AT ONCE/);
+
+    const before = await s.call('category_warmth', { category: 'yoga mat' });
+    assert.match(before, /Nothing held for "yoga mat"/);
+    assert.match(before, /Call `research_product` to start one/, 'the cold copy names the door that now exists');
+
+    const started = await s.call('research_product', { subject: 'yoga mat', terms: ['grip'] });
+    assert.match(started, /^Started a harvest for "yoga mat" \(report rep_[0-9a-f]{16}\)/);
+    assert.match(started, /0 records held now/);
+    assert.match(started, /again in about 30 seconds/);
+
+    const again = await s.call('research_product', { subject: 'Yoga  Mat' });
+    assert.match(again, /^Joined a harvest already running for "yoga mat"/, 'the same subject joins rather than starts');
+
+    const during = await s.call('category_warmth', { category: 'yoga mat' });
+    assert.match(during, /Nothing held yet for "yoga mat"/);
+    assert.match(during, /in progress .*started \d+s ago/);
+
+    const searched = await s.call('search_evidence', { query: 'grip', category: 'yoga mat' });
+    assert.match(searched, /in progress/);
+  } finally { await s.close(); }
+});
+
+test('THE PUBLIC DOOR RUNS ONE HARVEST AT A TIME; A KEY IS NOT HELD TO THAT', async () => {
+  const s = await live({ withQueue: true });
+  try {
+    assert.match(await s.call('research_product', { subject: 'yoga mat' }), /^Started/);
+    const second = await s.call('research_product', { subject: 'standing desk' });
+    assert.match(second, /already running on the public door/);
+    assert.match(second, /only one runs at a time/);
+
+    const keyed = await s.call('research_product', { subject: 'standing desk' }, { authorization: 'Bearer secret-key' });
+    assert.match(keyed, /^Started a harvest for "standing desk"/, 'a key gets the ordinary allowance');
+  } finally { await s.close(); }
+});
+
+test('THE PUBLIC DOOR STARTS AT MOST THREE HARVESTS AN HOUR', async () => {
+  const s = await live({ withQueue: true, instant: true });
+  const drain = () => new Promise((resolve) => { setTimeout(resolve, 5); });
+  try {
+    for (const subject of ['one', 'two', 'three']) {
+      assert.match(await s.call('research_product', { subject: `subject ${subject}` }), /^Started/);
+      await drain();
+    }
+    const fourth = await s.call('research_product', { subject: 'subject four' });
+    assert.match(fourth, /at most 3 harvests an hour/);
+    assert.match(fourth, /read tools still answer/);
+    const keyed = await s.call('research_product', { subject: 'subject four' }, { authorization: 'Bearer secret-key' });
+    assert.match(keyed, /^Started/, 'the hourly cap is the public door\'s alone');
   } finally { await s.close(); }
 });

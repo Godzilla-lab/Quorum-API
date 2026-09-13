@@ -67,7 +67,7 @@ Three rules follow:
 
 | Tool | Does | Notes |
 |---|---|---|
-| `research_product` | Start a report from a URL or a name | **Off unless QUORUM_MCP_RESEARCH=1** |
+| `research_product` | Start a report from a URL or a name | Local: **off unless QUORUM_MCP_RESEARCH=1**, and it blocks until the report is done. Remote: always on, starts the harvest and returns at once |
 | `search_evidence` | Query the corpus directly, no synthesis | Aggregated counts plus top records |
 | `get_receipt` | Resolve one or many receipt ids to real records | Batched |
 | `category_warmth` | Coverage, and whether an ask is cheap or expensive | Lets an agent decide before spending |

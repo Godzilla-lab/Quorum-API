@@ -245,21 +245,93 @@ export function createReceiptsServer(options: ServerOptions): Server {
   const quotas = options.quotas;
 
   /*
-   * THE REMOTE MCP ENDPOINT: the same four read only tools the stdio server
-   * speaks, at POST /mcp, so a hosted instance has a URL that MCP clients and
-   * connector forms can take. Streamable HTTP in its stateless form: one JSON
-   * response per POST, no sessions, no server initiated stream. The research
-   * tool is deliberately absent, exactly as the stdio server's read only
-   * default: an agent must not start minutes of retrieval by accident.
+   * THE REMOTE MCP ENDPOINT: the same tools the stdio server speaks, at POST
+   * /mcp, so a hosted instance has a URL that MCP clients and connector forms
+   * can take. Streamable HTTP in its stateless form: one JSON response per
+   * POST, no sessions, no server initiated stream.
+   *
+   * `research_product` IS PRESENT WHEN THERE IS A QUEUE, AND IT RETURNS AT
+   * ONCE. Until 2026-09-13 this door was read only and told a new subject
+   * "this server cannot start one", which to an agent is not slow, it is
+   * nothing. It now starts the harvest through the queue POST /v1/reports
+   * uses, under the caller's key or the shared public bucket, and answers
+   * with what is held and when to ask again. Records are searchable as they
+   * land, so the read tools carry the answer while the run continues. Ads
+   * and synthesis never run from here; the public bucket is capped below.
    */
-  const mcpTools = createTools({ corpus });
+  const ANONYMOUS_HARVESTS_PER_HOUR = 3;
+  const anonymousHarvests: number[] = [];
+  const startHarvest = async (subject: string, terms: string[], keyLabel: string): Promise<string> => {
+    if (!queue) return 'This server runs no job queue, so it cannot start a harvest.';
+    const anonymous = keyLabel === 'mcp-public';
+    /* Joining a run already in flight costs the archives nothing more, so the
+     * public caps below are for STARTING one. Two agents asking about the same
+     * subject share the run, as two keyed callers would. */
+    const joining = queue.harvestFor(subject) !== null;
+    if (anonymous && !joining) {
+      /*
+       * Nothing here costs money, but a harvest is minutes of requests to
+       * volunteer archives, and an open door must not let one caller turn
+       * this server into their scraper. One in flight and three an hour for
+       * everyone without a key; a key gets the ordinary report allowance.
+       * In memory like every other quota, so a restart refills it: three
+       * more harvests per restart is the documented cost of no quota table.
+       */
+      if (queue.runningFor(keyLabel) >= 1) {
+        return 'A harvest is already running on the public door, and only one runs at a time for '
+          + 'callers without a key. Ask again in a minute, or keep reading what is held: records '
+          + 'land as they arrive.';
+      }
+      const hourAgo = Date.now() - 3600_000;
+      while (anonymousHarvests.length && anonymousHarvests[0]! < hourAgo) anonymousHarvests.shift();
+      if (anonymousHarvests.length >= ANONYMOUS_HARVESTS_PER_HOUR) {
+        return `The public door starts at most ${ANONYMOUS_HARVESTS_PER_HOUR} harvests an hour and they `
+          + 'are used. A keyed POST /v1/reports at the hosted API has its own allowance; until then '
+          + 'the read tools still answer from everything already held.';
+      }
+    }
+    if (quotas) {
+      const decision = quotas.check(keyLabel, 'reports');
+      if (!decision.allowed) {
+        return `The report allowance for this key is used; it refills in ${decision.retryAfterSeconds}s. `
+          + 'The read tools still answer from what is held.';
+      }
+    }
+    const parsed = parseReportRequest({ subject, terms });
+    if (typeof parsed === 'string') return `Could not start: ${parsed}`;
+    const result = await queue.submit(parsed, { keyLabel });
+    if (!result.ok) return `Could not start: ${result.message}`;
+    const { id, coalesced, category } = result.accepted;
+    if (anonymous && !coalesced) anonymousHarvests.push(Date.now());
+    const held = await corpus.categoryStats(category).catch(() => null);
+    const holding = held ? `${held.docs} records held now` : 'holdings unknown';
+    return (coalesced
+      ? `Joined a harvest already running for ${JSON.stringify(category)} (report ${id}). `
+      : `Started a harvest for ${JSON.stringify(category)} (report ${id}). `)
+      + `${holding}. The first records land within a minute and a full run takes minutes. `
+      + `Call \`search_evidence\` or \`category_warmth\` for ${JSON.stringify(category)} again in about `
+      + '30 seconds and keep going while the counts grow; every receipt shown is already real. '
+      + `A keyed GET /v1/reports/${id} returns the finished report with its findings.`;
+  };
+  /* Built per request, because the harvest starter runs under the caller's key. */
+  const mcpToolsFor = (keyLabel: string) => createTools({
+    corpus,
+    ...(queue
+      ? {
+        harvestInFlight: (subject: string) => queue.harvestFor(subject),
+        startResearch: (subject: string, terms: string[]) => startHarvest(subject, terms, keyLabel),
+      }
+      : {}),
+  });
   const MCP_INFO = {
     name: 'quorum',
     version: '0.1.0',
     instructions: 'Market evidence with receipts. Search what buyers actually said, resolve any '
       + 'receipt id back to the real record behind it, and check a category\'s warmth before '
-      + 'asking for a report. Every claim these tools return can be independently verified: '
-      + 'an id that does not resolve was never real.',
+      + 'asking for a report. On a subject nothing is held for, `research_product` starts a '
+      + 'harvest and returns at once; the read tools answer while it runs and their counts grow. '
+      + 'Every claim these tools return can be independently verified: an id that does not '
+      + 'resolve was never real.',
   };
 
   /*
@@ -392,7 +464,7 @@ export function createReceiptsServer(options: ServerOptions): Server {
      * session id, no server initiated stream. The protocol logic is the same
      * `handleMessage` the stdio server runs, so the two transports cannot
      * drift. See the auth block for why this path is open on a keyed
-     * instance, and `createTools` for why the research tool is absent.
+     * instance, and `startHarvest` above for what research_product does here.
      */
     {
       method: 'POST',
@@ -402,7 +474,7 @@ export function createReceiptsServer(options: ServerOptions): Server {
         const messages = batched ? ctx.body as unknown[] : [ctx.body];
         const replies: Record<string, unknown>[] = [];
         for (const message of messages) {
-          const reply = await handleMessage(message, mcpTools, MCP_INFO);
+          const reply = await handleMessage(message, mcpToolsFor(ctx.keyLabel), MCP_INFO);
           if (reply) replies.push(reply);
         }
         /* Notifications only. The spec wants a bodiless 202, and an undefined

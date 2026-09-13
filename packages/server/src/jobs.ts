@@ -247,7 +247,13 @@ export const reportId = (): string => `rep_${randomBytes(8).toString('hex')}`;
  * product. That miss costs a duplicate run and is stated rather than hidden.
  */
 export function coalescingKey(request: ReportRequest): string {
-  return request.subject.trim().toLowerCase().replace(/\s+/g, ' ');
+  return subjectKey(request.subject);
+}
+
+/* The subject text as runs are keyed on it. Exported so a caller holding only
+ * the words can ask the queue about them. */
+export function subjectKey(subject: string): string {
+  return subject.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 interface Run {
@@ -343,6 +349,14 @@ export interface JobQueue {
   /* Reports this key has queued or running. The same count the per key cap
    * refuses on, so a usage report and a 429 cannot disagree. */
   runningFor(keyLabel: string): number;
+  /*
+   * Whether a run for this subject is queued or running now. Keyed the way
+   * runs coalesce, on the subject text, so a caller asking with the words
+   * that started it gets an answer and one using the resolved category name
+   * may not; the read tools say "in progress" in the first case and simply
+   * report what is held in the second. Null once the run has settled.
+   */
+  harvestFor(subject: string): { status: 'queued' | 'running'; startedAt: number | null } | null;
   get(id: string): ReportSnapshot | null;
   /* Detaches this report. The run continues while any other report is still
    * attached to it. Returns null when the id names nothing. */
@@ -648,6 +662,12 @@ export function createJobQueue(options: QueueOptions): JobQueue {
 
   return {
     runningFor: inFlightFor,
+
+    harvestFor(subject) {
+      const run = runsByKey.get(subjectKey(subject));
+      if (!run || (run.status !== 'queued' && run.status !== 'running')) return null;
+      return { status: run.status, startedAt: run.startedAt };
+    },
 
     async submit(request, { keyLabel, idempotencyKey }) {
       /* Swept on use rather than on a timer. A timer in a library is a handle

@@ -789,3 +789,15 @@ test('an estimate that cannot be computed degrades to null, never a refusal', as
   assert.equal(accepted.ok, true, 'the submit must be accepted');
   assert.equal((accepted as { accepted: { estimatedSeconds: number | null } }).accepted.estimatedSeconds, null);
 });
+
+test('harvestFor reports a run while it is queued or running, and nothing once it has settled', async () => {
+  const { q, runner } = queue();
+  assert.equal(q.harvestFor('wool runner'), null);
+  await q.submit(request(), { keyLabel: 'key-a' });
+  const inFlight = q.harvestFor('  Wool   RUNNER ');
+  assert.equal(inFlight?.status, 'running', 'keyed the way runs coalesce, so spacing and case do not matter');
+  assert.equal(typeof inFlight?.startedAt, 'number');
+  runner.finish();
+  await settled();
+  assert.equal(q.harvestFor('wool runner'), null, 'a settled run is not in progress');
+});
