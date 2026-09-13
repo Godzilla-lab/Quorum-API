@@ -1,0 +1,82 @@
+# Keeps the Aiven corpus awake.
+#
+# WHY THIS EXISTS. The corpus lives on an Aiven free plan, and Aiven powers off
+# free services that see no continuative activity. Render's free tier spins the
+# API down when nothing calls it, so on a quiet day the database gets zero
+# queries and Aiven switches it off. Observed 2026-09-13: the service sitting in
+# `Rebuilding` after being manually powered back on, for the third time.
+#
+# WHY NOT /v1/healthz. It deliberately touches no database, which is the right
+# design for a health check and useless here: Render can ping it all day and
+# Aiven still counts the service as idle. See the comment in render.yaml.
+#
+# WHY category_warmth. `/mcp` is open on this keyed instance by documented
+# stance, the tool is read only, it spends nothing, and with no arguments it
+# lists what the corpus holds. So it is a real Postgres read that needs no
+# secret in this public repo.
+#
+# THIS IS ALSO A MONITOR. If the database is off, or the corpus has been
+# emptied, the assertion below fails and GitHub emails the failure. That is the
+# whole alerting story and it costs nothing.
+#
+# KNOWN LIMIT: GitHub disables scheduled workflows on a public repository after
+# 60 days with no commits, and emails before it does. If the repo goes quiet for
+# two months, this stops and Aiven starts powering the database off again.
+
+name: keepalive
+
+on:
+  schedule:
+    # Every six hours. Aiven does not publish the idle threshold for Postgres;
+    # its OpenSearch free tier documents 24 hours, so six gives four attempts
+    # inside the only window we have a number for. It also costs about 30 of
+    # Render's 750 free instance hours a month, because each ping wakes the
+    # dyno for roughly 15 minutes.
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+
+    # A ceiling on the whole job. Measured 2026-09-13 from a laptop: one call
+    # hung for about fifteen minutes past curl's own timeout before the retry
+    # succeeded, so the request timeout alone is not a bound on the job.
+    timeout-minutes: 10
+    steps:
+      - name: Read the corpus so Aiven sees activity
+        env:
+          # A repository variable, so a self hoster can point this at their own
+          # instance without editing the file.
+          BASE: ${{ vars.QUORUM_BASE_URL || 'https://quorum-api-j15n.onrender.com' }}
+        run: |
+          set -uo pipefail
+
+          # Three attempts. The first request of the day pays a Render cold
+          # start, and a database that is powering back on returns errors for a
+          # minute or two. A job that cries wolf is a job everyone learns to
+          # ignore, so only three consecutive failures count as one.
+          for attempt in 1 2 3; do
+            echo "attempt $attempt"
+            body=$(curl -sS -m 120 -X POST "$BASE/mcp" \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"category_warmth","arguments":{}}}') || body=''
+
+            # The tool prints one line per category held. Anything less means
+            # the read did not reach Postgres, whatever status code came back.
+            if printf '%s' "$body" | grep -q 'Categories held' \
+               && printf '%s' "$body" | grep -q 'records'; then
+              held=$(printf '%s' "$body" | grep -o 'records' | wc -l | tr -d ' ')
+              echo "corpus answered, $held categories held"
+              exit 0
+            fi
+
+            echo "no corpus in the response:"
+            printf '%s\n' "$body" | head -c 500
+            [ "$attempt" -lt 3 ] && sleep 60
+          done
+
+          echo "the corpus did not answer three times in a row."
+          echo "check whether pg-ca6ec21 is powered off in the Aiven console."
+          exit 1
