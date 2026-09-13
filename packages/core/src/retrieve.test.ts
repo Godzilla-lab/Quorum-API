@@ -439,3 +439,61 @@ test('the cap counts across sources, not per source', async () => {
   assert.ok(result.totalWritten <= 50, `${result.totalWritten} rows written against a cap of 50`);
   await corpus.close();
 });
+
+/* ------------------------------------------------------------------ */
+
+test('sources run concurrently, so retrieval approaches the slowest source rather than the sum', async () => {
+  /*
+   * Two sources that each hold their first record until BOTH have started.
+   * Run one at a time this deadlocks, because the first never finishes; run
+   * concurrently it completes, which is the whole assertion.
+   */
+  let started = 0;
+  let release!: () => void;
+  const bothStarted = new Promise<void>((resolve) => { release = resolve; });
+  const gated = (id: string): Source => ({
+    ...makeSource(id),
+    async *retrieve() {
+      started++;
+      if (started === 2) release();
+      await bothStarted;
+      yield record(1, { externalId: `${id}-1` });
+    },
+  });
+  const corpus = freshCorpus();
+  const result = await retrieveAll({
+    sources: [gated('a'), gated('b')],
+    corpus, plan: PLAN, ctx: makeCtx(),
+    deadlineMs: 5_000,
+  });
+  assert.equal(result.totalWritten, 2);
+  assert.deepEqual(result.outcomes.map((o) => o.sourceId), ['a', 'b'], 'outcomes keep registry order however they finished');
+  await corpus.close();
+});
+
+test('the total cap holds across sources batching at the same time', async () => {
+  const corpus = freshCorpus();
+  const many = (prefix: string) => () =>
+    Array.from({ length: 300 }, (_, i) => record(i, { externalId: `${prefix}${i}` }));
+  const result = await retrieveAll({
+    sources: ['a', 'b', 'c', 'd'].map((id) => makeSource(id, { records: many(id) })),
+    corpus, plan: PLAN, ctx: makeCtx(),
+    maxRecordsTotal: 120,
+    batchSize: 50,
+  });
+  assert.ok(result.totalWritten <= 120, `${result.totalWritten} rows written against a cap of 120 with four sources in flight`);
+  assert.equal(result.stoppedEarly, 'record-cap');
+  await corpus.close();
+});
+
+test('concurrency one is the old sequential behaviour', async () => {
+  const order: string[] = [];
+  const corpus = freshCorpus();
+  await retrieveAll({
+    sources: ['a', 'b', 'c'].map((id) => makeSource(id, { onRetrieve: () => order.push(id) })),
+    corpus, plan: PLAN, ctx: makeCtx(),
+    concurrency: 1,
+  });
+  assert.deepEqual(order, ['a', 'a', 'b', 'b', 'c', 'c'], 'two queries per source, one source at a time');
+  await corpus.close();
+});

@@ -79,6 +79,8 @@ export interface RetrieveOptions {
   maxQueriesPerSource?: number;
   /* Records are written in batches of this size as they arrive. */
   batchSize?: number;
+  /* How many sources run at once. See the worker pool in retrieveAll. */
+  concurrency?: number;
   onProgress?: (update: { source: string; seen: number; written: number; query: string }) => void;
 }
 
@@ -89,6 +91,17 @@ const DEFAULTS = {
   maxRecordsTotal: 20_000,
   maxQueriesPerSource: 60,
   batchSize: 100,
+  /*
+   * Four, because the throttle is per upstream (sharedThrottle keys on the
+   * upstream name), so four DIFFERENT sources in flight put no more pressure
+   * on any one archive than one did. Measured 2026-09-13 over 37 hosted cold
+   * runs: sources ran one after another and retrieval took 236s to 504s, the
+   * sum of eleven sources; the slowest single source (reddit) averaged 92s.
+   * Concurrent, retrieval approaches the slowest source rather than the sum.
+   * Four rather than eleven because the hosted tier is 0.1 CPU and the gate
+   * runs on every record.
+   */
+  concurrency: 4,
 };
 
 export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalResult> {
@@ -99,6 +112,7 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
     maxRecordsTotal = DEFAULTS.maxRecordsTotal,
     maxQueriesPerSource = DEFAULTS.maxQueriesPerSource,
     batchSize = DEFAULTS.batchSize,
+    concurrency = DEFAULTS.concurrency,
     onProgress,
   } = options;
 
@@ -121,11 +135,23 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
   const outOfTime = (): boolean => Date.now() >= deadline;
   const cancelled = (): boolean => ctx.signal?.aborted === true;
 
-  for (const [index, source] of sources.entries()) {
-    if (cancelled()) { stoppedEarly = 'cancelled'; break; }
-    if (outOfTime()) { stoppedEarly = 'deadline'; break; }
-    if (totalWritten >= maxRecordsTotal) { stoppedEarly = 'record-cap'; break; }
+  /*
+   * Records pushed to a source's batch and not yet flushed, summed over every
+   * source in flight. The total cap has to count these: `totalWritten` only
+   * moves on a flush, and with several sources batching at once a cap tested
+   * against it alone overshoots by up to a batch per source.
+   */
+  let unflushed = 0;
+  /*
+   * Budget handed to sources still in flight and not yet written by them.
+   * A source starting while others run must share what is left AFTER their
+   * claims, or the last source in a concurrent run is short changed: seen on
+   * the cap test the day the pool landed, when a fifth source started after
+   * four had written their shares and counted them as still to come.
+   */
+  let reserved = 0;
 
+  const runSource = async (source: Source, index: number): Promise<void> => {
     /*
      * A FAIR SHARE OF THE TOTAL, SO ONE SOURCE CANNOT STARVE THE REST.
      *
@@ -139,8 +165,10 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
      * stranding it.
      */
     const remainingSources = sources.length - index;
-    const fairShare = Math.max(1, Math.ceil((maxRecordsTotal - totalWritten) / remainingSources));
+    const available = Math.max(0, maxRecordsTotal - totalWritten - reserved);
+    const fairShare = Math.max(1, Math.ceil(available / remainingSources));
     const sourceBudget = Math.min(maxRecordsPerSource, fairShare);
+    reserved += sourceBudget;
 
     const sourceStart = Date.now();
     const outcome: SourceOutcome = {
@@ -167,7 +195,8 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
         reason: 'not_configured',
         impact: `no ${source.id} evidence in this report`,
       });
-      continue;
+      reserved -= sourceBudget;
+      return;
     }
 
     let queries: Query[] = [];
@@ -184,7 +213,8 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
       outcome.elapsedMs = Date.now() - sourceStart;
       outcomes.push(outcome);
       degraded.push({ source: source.id, reason: 'plan_failed', impact: `no ${source.id} evidence in this report` });
-      continue;
+      reserved -= sourceBudget;
+      return;
     }
 
     if (!queries.length) {
@@ -193,13 +223,16 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
       outcome.elapsedMs = Date.now() - sourceStart;
       outcomes.push(outcome);
       degraded.push({ source: source.id, reason: 'no_queries', impact: `no ${source.id} evidence in this report` });
-      continue;
+      reserved -= sourceBudget;
+      return;
     }
 
     let batch: DocInput[] = [];
     const flush = async (): Promise<void> => {
       if (!batch.length) return;
+      unflushed -= batch.length;
       const written = await corpus.addDocs(batch, plan.category);
+      reserved -= written;
       outcome.recordsWritten += written;
       totalWritten += written;
       batch = [];
@@ -212,7 +245,7 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
       if (outOfTime()) { stoppedEarly = 'deadline'; break; }
       if (outcome.recordsSeen >= maxRecordsPerSource) break;
       if (outcome.recordsWritten >= sourceBudget) break;
-      if (totalWritten >= maxRecordsTotal) { stoppedEarly = 'record-cap'; break; }
+      if (totalWritten + unflushed >= maxRecordsTotal) { stoppedEarly = 'record-cap'; break; }
 
       outcome.queriesRun++;
 
@@ -263,6 +296,7 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
           }
 
           batch.push(record);
+          unflushed++;
           if (batch.length >= batchSize) await flush();
           if (outcome.recordsSeen >= maxRecordsPerSource) break;
           if (outcome.recordsWritten + batch.length >= sourceBudget) break;
@@ -275,7 +309,7 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
            * which is 83% over a number the help text calls a hard cap. Counting
            * the unflushed batch makes the word true.
            */
-          if (totalWritten + batch.length >= maxRecordsTotal) { stoppedEarly = 'record-cap'; break; }
+          if (totalWritten + unflushed >= maxRecordsTotal) { stoppedEarly = 'record-cap'; break; }
         }
         /*
          * FLUSHED PER QUERY, NOT ONLY PER 100 RECORDS, so the progress line
@@ -336,8 +370,33 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
 
     outcome.elapsedMs = Date.now() - sourceStart;
     outcomes.push(outcome);
-    if (stoppedEarly) break;
-  }
+    reserved -= Math.max(0, sourceBudget - outcome.recordsWritten);
+  };
+
+  /*
+   * A SMALL POOL OF WORKERS PULLING FROM ONE CURSOR, so the registry order is
+   * still the order sources start in, the fastest first. Every worker checks
+   * the stop conditions before taking the next source; one that trips them
+   * stops the pool, and the sources it never reached are reported below.
+   * Outcomes are sorted back into registry order afterwards, because the
+   * order they finish in is a fact about the network and not about the run.
+   */
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < sources.length) {
+      if (stoppedEarly) return;
+      if (cancelled()) { stoppedEarly = 'cancelled'; return; }
+      if (outOfTime()) { stoppedEarly = 'deadline'; return; }
+      if (totalWritten + unflushed >= maxRecordsTotal) { stoppedEarly = 'record-cap'; return; }
+      const index = next++;
+      await runSource(sources[index]!, index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, sources.length)) }, worker));
+
+  const position = new Map(sources.map((s, i) => [s.id, i]));
+  outcomes.sort((a, b) => (position.get(a.sourceId) ?? 0) - (position.get(b.sourceId) ?? 0));
+  degraded.sort((a, b) => (position.get(a.source) ?? 0) - (position.get(b.source) ?? 0));
 
   /*
    * The cap announces itself even when every source got its fair share and
