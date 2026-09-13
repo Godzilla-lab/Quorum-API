@@ -351,7 +351,21 @@ export async function retrieveAll(options: RetrieveOptions): Promise<RetrievalRe
      * Exactly backwards, and it produced a report that looked complete while a
      * leg had crashed. Caught by a test on 2026-08-22.
      */
-    if (outcome.recordsWritten === 0) {
+    /*
+     * A SOURCE WHOSE RECORDS WERE ALL ALREADY HELD IS NOT DEGRADED. On a warm
+     * re-run the corpus writes nothing for a source it has already stored, and
+     * until 2026-09-13 that read as "degraded, returned nothing" with "no cpsc
+     * evidence in this report": false twice, because the source returned
+     * twelve records and the report's claims read every one of them from the
+     * corpus. Seen live the day concurrent retrieval landed. Records that
+     * passed the gate and were not written were already held (or repeated
+     * within the run), and that is what the reason now says.
+     */
+    const alreadyHeld = outcome.recordsSeen - outcome.recordsGated - outcome.recordsWritten;
+    if (outcome.recordsWritten === 0 && outcome.status === 'ok' && alreadyHeld > 0) {
+      outcome.reason = `${alreadyHeld} seen and already held`
+        + (outcome.recordsGated > 0 ? `, ${outcome.recordsGated} off topic` : '');
+    } else if (outcome.recordsWritten === 0) {
       if (outcome.status === 'ok') {
         outcome.status = 'degraded';
         outcome.reason = outcome.recordsGated > 0

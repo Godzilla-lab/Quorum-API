@@ -497,3 +497,15 @@ test('concurrency one is the old sequential behaviour', async () => {
   assert.deepEqual(order, ['a', 'a', 'b', 'b', 'c', 'c'], 'two queries per source, one source at a time');
   await corpus.close();
 });
+
+test('a source whose records are all already held is ok, not degraded', async () => {
+  const corpus = freshCorpus();
+  const opts = { sources: [makeSource('a')], corpus, plan: PLAN, ctx: makeCtx() };
+  await retrieveAll(opts);
+  const second = await retrieveAll(opts);
+  const a = second.outcomes[0]!;
+  assert.equal(a.status, 'ok', 'the source answered and the corpus already had it');
+  assert.match(a.reason ?? '', /already held/);
+  assert.deepEqual(second.degraded, [], 'nothing is missing from the report, so nothing is degraded');
+  await corpus.close();
+});
