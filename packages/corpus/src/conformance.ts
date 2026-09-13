@@ -800,6 +800,68 @@ export function runConformanceSuite(
     });
   });
 
+  /*
+   * Facets. Labels a source attached, kept beside the text. The property that
+   * matters is that they round trip untouched and count per value with
+   * receipts, and that a record without them reads as null everywhere.
+   */
+  test(`${driverName}: facets round trip on every read path and are null when absent`, async () => {
+    await withCorpus(async (c) => {
+      await c.addDocs([
+        doc({ externalId: 'f1', source: 'cfpb', text: 'they closed my account and kept the money', facets: { issue: 'Closing an account', company_response: 'Closed with monetary relief' } }),
+        doc({ externalId: 'f2', text: 'the sizing runs small, size up' }),
+      ], 'chime');
+      const held = await c.byCategory('chime');
+      const labelled = held.find((d) => d.externalId === 'f1');
+      const plain = held.find((d) => d.externalId === 'f2');
+      assert.deepEqual(labelled?.facets, { issue: 'Closing an account', company_response: 'Closed with monetary relief' });
+      assert.equal(plain?.facets, null, 'no labels is null, never an empty object');
+      const searched = await c.search('account', { category: 'chime' });
+      assert.deepEqual(searched[0]?.facets, labelled?.facets, 'search carries them too');
+      const resolved = await c.getByReceiptIds([labelled!.receiptId]);
+      assert.deepEqual(resolved[0]?.facets, labelled?.facets, 'and so does the resolver');
+      const again = await c.addDocs([doc({ externalId: 'f1', source: 'cfpb', text: 'they closed my account and kept the money', facets: { issue: 'changed' } })], 'chime');
+      assert.equal(again, 0, 'a re-harvest never rewrites a stored record, labels included');
+    });
+  });
+
+  test(`${driverName}: facet counts group one key per category, most records first, with receipts`, async () => {
+    await withCorpus(async (c) => {
+      const rows = [
+        ['a1', 'Closing an account', 'Closed with explanation'],
+        ['a2', 'Closing an account', 'Closed with monetary relief'],
+        ['a3', 'Closing an account', 'Closed with explanation'],
+        ['b1', 'Managing an account', 'Closed with explanation'],
+        ['b2', 'Managing an account', 'Closed with explanation'],
+        ['c1', 'Problem with a purchase', 'Closed with monetary relief'],
+      ] as const;
+      await c.addDocs(rows.map(([id, issue, response], i) => doc({
+        externalId: id, source: 'cfpb', text: `complaint ${id} about my account ${issue.toLowerCase()}`,
+        createdUtc: 1_700_000_000 + i, facets: { issue, company_response: response, timely: 'Yes' },
+      })), 'chime');
+      /* A record from another source with no labels must not count. */
+      await c.addDocs([doc({ externalId: 'r1', text: 'reddit says the account closing is a pain' })], 'chime');
+      /* Nor one in another category. */
+      await c.addDocs([doc({ externalId: 'z1', source: 'cfpb', text: 'other category account closing', facets: { issue: 'Closing an account' } })], 'zeta');
+
+      const issues = await c.facetCounts('chime', 'issue');
+      assert.deepEqual(issues.map((f) => [f.value, f.records]), [
+        ['Closing an account', 3], ['Managing an account', 2], ['Problem with a purchase', 1],
+      ]);
+      assert.equal(issues[0]?.receiptIds.length, 3, 'every value carries receipts to open');
+      const resolved = await c.getByReceiptIds(issues[0]!.receiptIds);
+      assert.ok(resolved.every((d) => d.facets?.['issue'] === 'Closing an account'), 'the receipts are the rows counted');
+
+      const responses = await c.facetCounts('chime', 'company_response', { limit: 1, receiptsPerValue: 1 });
+      assert.deepEqual(responses.map((f) => [f.value, f.records, f.receiptIds.length]), [['Closed with explanation', 4, 1]]);
+
+      assert.deepEqual(await c.facetCounts('chime', 'issue', { source: 'reddit' }), [], 'a source filter is honoured');
+      assert.deepEqual(await c.facetCounts('chime', 'no_such_key'), [], 'a key nobody carries is empty, not an error');
+      assert.deepEqual(await c.facetCounts('chime', 'issue; DROP TABLE docs'), [], 'a key that is not a key is refused');
+      assert.deepEqual((await c.facetCounts('  CHIME ', 'issue')).map((f) => f.records), [3, 2, 1], 'category is normalised like everywhere else');
+    });
+  });
+
   test(`${driverName}: a provisional snapshot is replaced and a terminal one is not`, async () => {
     await withCorpus(async (c) => {
       const id = 'rep_bbbbbbbbbbbbbbbb';

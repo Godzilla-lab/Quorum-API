@@ -45,6 +45,9 @@ import type {
   Doc,
   DocHit,
   DocInput,
+  FacetCount,
+  FacetCountOptions,
+  Facets,
   Monitor,
   MonitorInput,
   DurationConfidence,
@@ -99,7 +102,24 @@ interface DocRow {
   receipt_id: string; source: string; kind: string; external_id: string;
   category: string; channel: string | null; text: string;
   score: unknown; url: string | null; created_utc: unknown; harvested_at: unknown;
+  facets?: unknown;
   rank?: unknown;
+}
+
+/* pg hands jsonb back parsed; a thinner client hands back the json text. Both
+ * are read. Anything that is not a flat object of strings is treated as no
+ * labels, because a label that is not a string is drift. */
+function toFacets(raw: unknown): Facets | null {
+  let value = raw;
+  if (typeof value === 'string') {
+    try { value = JSON.parse(value); } catch { return null; }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out: Facets = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length) out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 function toDoc(r: DocRow): Doc {
@@ -115,6 +135,7 @@ function toDoc(r: DocRow): Doc {
     url: r.url ?? '',
     createdUtc: num(r.created_utc),
     harvestedAt: num(r.harvested_at),
+    facets: toFacets(r.facets),
   };
 }
 
@@ -260,12 +281,13 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
               storableText(category), storableText(d.channel ?? ''), storableText(d.text),
               d.score ?? 0, storableText(d.url ?? ''),
               d.createdUtc ?? 0, harvestedAt,
+              d.facets && Object.keys(d.facets).length ? JSON.stringify(d.facets) : null,
             );
-            values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11})`);
+            values.push(`($${base + 1},$${base + 2},$${base + 3},$${base + 4},$${base + 5},$${base + 6},$${base + 7},$${base + 8},$${base + 9},$${base + 10},$${base + 11},$${base + 12})`);
           }
           const inserted = await tx.query<{ id: unknown }>(
             `INSERT INTO docs
-               (receipt_id, source, kind, external_id, category, channel, text, score, url, created_utc, harvested_at)
+               (receipt_id, source, kind, external_id, category, channel, text, score, url, created_utc, harvested_at, facets)
              VALUES ${values.join(',')}
              ON CONFLICT (source, external_id, category) DO NOTHING
              RETURNING id`,
@@ -333,7 +355,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
        */
       const text =
         `SELECT d.receipt_id, d.source, d.kind, d.external_id, d.category, d.channel,
-                d.text, d.score, d.url, d.created_utc, d.harvested_at,
+                d.text, d.score, d.url, d.created_utc, d.harvested_at, d.facets,
                 ts_rank(d.text_tsv, ${queryFn}('english', $1), 1) AS rank
          FROM docs d
          WHERE ${where.join(' AND ')}
@@ -418,7 +440,7 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
 
       const rows = await sql.query<DocRow>(
         `SELECT receipt_id, source, kind, external_id, category, channel,
-                text, score, url, created_utc, harvested_at
+                text, score, url, created_utc, harvested_at, facets
          FROM docs WHERE ${where.join(' AND ')}
          ORDER BY score DESC LIMIT $${params.length}`,
         params,
@@ -426,11 +448,43 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       return rows.map(toDoc);
     },
 
+    async facetCounts(category: string, key: string, options: FacetCountOptions = {}): Promise<FacetCount[]> {
+      /* The key is a json path fragment, so it is checked rather than trusted. */
+      if (!/^[a-z][a-z0-9_]{0,63}$/.test(key)) return [];
+      const limit = Math.max(1, Math.min(options.limit ?? 20, 200));
+      const per = Math.max(0, Math.min(options.receiptsPerValue ?? 5, 50));
+      const params: unknown[] = [normaliseCategory(category), key];
+      let where = 'category = $1 AND facets ? $2';
+      if (options.source) { params.push(options.source); where += ` AND source = $${params.length}`; }
+      params.push(limit);
+      const groups = await sql.query<{ value: string; records: unknown }>(
+        `SELECT facets->>$2 AS value, COUNT(*) AS records
+         FROM docs WHERE ${where}
+         GROUP BY value ORDER BY records DESC, value ASC LIMIT $${params.length}`,
+        params,
+      );
+      /* The same filters minus the limit, plus the value and the per value cap. */
+      const scope = params.slice(0, -1);
+      const out: FacetCount[] = [];
+      for (const g of groups) {
+        const ids = per
+          ? await sql.query<{ receipt_id: string }>(
+            `SELECT receipt_id FROM docs
+             WHERE ${where} AND facets->>$2 = $${scope.length + 1}
+             ORDER BY created_utc DESC LIMIT $${scope.length + 2}`,
+            [...scope, g.value, per],
+          )
+          : [];
+        out.push({ value: g.value, records: num(g.records), receiptIds: ids.map((r) => r.receipt_id) });
+      }
+      return out;
+    },
+
     async getByReceiptIds(receiptIds: string[]): Promise<Doc[]> {
       if (!receiptIds.length) return [];
       const rows = await sql.query<DocRow>(
         `SELECT receipt_id, source, kind, external_id, category, channel,
-                text, score, url, created_utc, harvested_at
+                text, score, url, created_utc, harvested_at, facets
          FROM docs WHERE receipt_id = ANY($1)`,
         [receiptIds],
       );

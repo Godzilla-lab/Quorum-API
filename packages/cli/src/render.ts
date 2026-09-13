@@ -604,6 +604,25 @@ export function renderText(result: RunResult): string {
   }
 
   /*
+   * LABELLED. What a source's own classification of its records says, which
+   * is a different thing from a phrase this engine counted: the CFPB filed
+   * each complaint under an issue and recorded how the company closed it.
+   * Tallied over the records carrying the key, with that total printed so the
+   * percentages have a visible denominator, and receipts on every value.
+   */
+  for (const block of result.labelled) {
+    out.push(`LABELLED  ${block.title}`);
+    out.push(`  ${block.records} ${block.source} records carry this label. Counted, not inferred; the label is the source's own.`);
+    out.push('');
+    for (const v of block.values) {
+      out.push(
+        `  ${pad(v.value, 40)}${padStart(v.records, 5)} records  ${padStart(Math.round(v.share * 100), 3)}%   ${v.receiptIds.slice(0, 2).join(' ')}`,
+      );
+    }
+    out.push('');
+  }
+
+  /*
    * TREND, AND IT IS THE BLOCK NOBODY ELSE CAN PRINT.
    *
    * Every competitor holds a live index and answers about now. This is the only

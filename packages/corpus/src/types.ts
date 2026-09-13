@@ -54,6 +54,15 @@ export type RecordKind = 'post' | 'comment';
  * A record on the way in. `receiptId` is absent because the driver derives it,
  * so no caller can accidentally supply one that does not match its own content.
  */
+/*
+ * Labels a source attached to a record itself: the issue a regulator filed a
+ * complaint under, how the company closed it. String to string, flat, and
+ * absent for every source that has none. Never written into the text, which
+ * stays the speaker's words, and never into the channel, which corroboration
+ * counts as an independent voice.
+ */
+export type Facets = Record<string, string>;
+
 export interface DocInput {
   source: SourceId;
   kind: RecordKind;
@@ -63,6 +72,7 @@ export interface DocInput {
   score?: number;
   url?: string;
   createdUtc?: number;
+  facets?: Facets;
 }
 
 /* A record on the way out. */
@@ -78,6 +88,28 @@ export interface Doc {
   url: string;
   createdUtc: number;
   harvestedAt: number;
+  /* Null when the source attached no labels. Optional on the type so a fake
+   * built by hand in a test does not have to say so. */
+  facets?: Facets | null;
+}
+
+/* One value of one facet key, with how many records carry it and a few of
+ * them to open. Shares are for the caller to compute against the total it
+ * asked for, so a percentage is never printed over a denominator it did not
+ * see. */
+export interface FacetCount {
+  value: string;
+  records: number;
+  receiptIds: string[];
+}
+
+export interface FacetCountOptions {
+  /* Only records from this source. Absent, every source that carries the key. */
+  source?: SourceId;
+  /* How many values to return, most records first. */
+  limit?: number;
+  /* How many receipt ids to carry per value. */
+  receiptsPerValue?: number;
 }
 
 /* A search hit is a record plus its rank, which callers use for ordering only. */

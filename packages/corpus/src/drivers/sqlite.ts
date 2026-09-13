@@ -36,6 +36,9 @@ import type {
   Doc,
   DocHit,
   DocInput,
+  FacetCount,
+  FacetCountOptions,
+  Facets,
   Monitor,
   MonitorInput,
   DurationConfidence,
@@ -81,7 +84,22 @@ interface DocRow {
   url: string | null;
   created_utc: number | null;
   harvested_at: number;
+  facets?: string | null;
   rank?: number;
+}
+
+/* Stored as json text. Anything that is not a flat object of strings reads as
+ * no labels, because a label that is not a string is drift, not data. */
+function toFacets(value: string | null | undefined): Facets | null {
+  if (!value) return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { return null; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const out: Facets = {};
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.length) out[k] = v;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 function toDoc(row: DocRow): Doc {
@@ -97,6 +115,7 @@ function toDoc(row: DocRow): Doc {
     url: row.url ?? '',
     createdUtc: row.created_utc ?? 0,
     harvestedAt: row.harvested_at,
+    facets: toFacets(row.facets),
   };
 }
 
@@ -223,10 +242,20 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SQLITE_SCHEMA);
 
+  /*
+   * CREATE TABLE IF NOT EXISTS DOES NOT ADD A COLUMN TO A TABLE THAT EXISTS.
+   * A corpus opened before 2026-09-13 has no `facets` column and every insert
+   * below would fail on it. Postgres has migrations for this; the SQLite
+   * corpus is a file on a laptop that nobody migrates, so the column is added
+   * here, once, the first time an older file is opened.
+   */
+  const columns = (db.prepare('PRAGMA table_info(docs)').all() as { name: string }[]).map((c) => c.name);
+  if (!columns.includes('facets')) db.exec('ALTER TABLE docs ADD COLUMN facets TEXT');
+
   const insertDoc = db.prepare(`
     INSERT OR IGNORE INTO docs
-      (receipt_id, source, kind, external_id, category, channel, text, score, url, created_utc, harvested_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (receipt_id, source, kind, external_id, category, channel, text, score, url, created_utc, harvested_at, facets)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   /*
@@ -271,6 +300,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
             storableText(d.url ?? ''),
             d.createdUtc ?? 0,
             harvestedAt,
+            d.facets && Object.keys(d.facets).length ? JSON.stringify(d.facets) : null,
           );
           added += Number(result.changes);
         }
@@ -338,7 +368,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
        */
       const statement = db.prepare(`
         SELECT d.receipt_id, d.source, d.kind, d.external_id, d.category, d.channel,
-               d.text, d.score, d.url, d.created_utc, d.harvested_at,
+               d.text, d.score, d.url, d.created_utc, d.harvested_at, d.facets,
                bm25(docs_fts) AS rank
         FROM docs_fts
         CROSS JOIN docs d ON d.id = docs_fts.rowid
@@ -441,7 +471,7 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
 
       const rows = db.prepare(`
         SELECT receipt_id, source, kind, external_id, category, channel,
-               text, score, url, created_utc, harvested_at
+               text, score, url, created_utc, harvested_at, facets
         FROM docs WHERE ${where.join(' AND ')}
         ORDER BY score DESC LIMIT ?
       `).all(...args) as unknown as DocRow[];
@@ -454,12 +484,40 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
      * does not come back, which is what makes a fabricated citation impossible
      * rather than merely unlikely.
      */
+    async facetCounts(category: string, key: string, options: FacetCountOptions = {}): Promise<FacetCount[]> {
+      /* The key becomes a json path, so it is checked rather than trusted. */
+      if (!/^[a-z][a-z0-9_]{0,63}$/.test(key)) return [];
+      const limit = Math.max(1, Math.min(options.limit ?? 20, 200));
+      const per = Math.max(0, Math.min(options.receiptsPerValue ?? 5, 50));
+      const path = `$.${key}`;
+      const scope: (string | number)[] = [normaliseCategory(category), path];
+      let where = 'category = ? AND facets IS NOT NULL AND json_extract(facets, ?) IS NOT NULL';
+      if (options.source) { scope.push(options.source); where += ' AND source = ?'; }
+      const groups = db.prepare(`
+        SELECT json_extract(facets, ?) AS value, COUNT(*) AS records
+        FROM docs WHERE ${where}
+        GROUP BY value ORDER BY records DESC, value ASC LIMIT ?
+      `).all(path, ...scope, limit) as unknown as { value: string; records: number }[];
+      const ids = db.prepare(`
+        SELECT receipt_id FROM docs
+        WHERE ${where} AND json_extract(facets, ?) = ?
+        ORDER BY created_utc DESC LIMIT ?
+      `);
+      return groups.map((g) => ({
+        value: String(g.value),
+        records: Number(g.records),
+        receiptIds: per
+          ? (ids.all(...scope, path, String(g.value), per) as unknown as { receipt_id: string }[]).map((r) => r.receipt_id)
+          : [],
+      }));
+    },
+
     async getByReceiptIds(receiptIds: string[]): Promise<Doc[]> {
       if (!receiptIds.length) return [];
       const placeholders = receiptIds.map(() => '?').join(',');
       const rows = db.prepare(`
         SELECT receipt_id, source, kind, external_id, category, channel,
-               text, score, url, created_utc, harvested_at
+               text, score, url, created_utc, harvested_at, facets
         FROM docs WHERE receipt_id IN (${placeholders})
       `).all(...receiptIds) as unknown as DocRow[];
 

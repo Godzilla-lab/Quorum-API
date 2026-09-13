@@ -53,6 +53,7 @@ function result(over: Partial<RunResult> = {}): RunResult {
     trends: [],
     voice: [],
     themes: [],
+    labelled: [],
     asOf: null,
     diff: null,
     comparison: null,

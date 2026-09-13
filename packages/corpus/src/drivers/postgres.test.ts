@@ -47,8 +47,9 @@ test('postgres: addDocs derives the receipt id rather than trusting the caller',
   assert.ok(call);
   assert.equal(call.params[0], receiptId('reddit', 't1_abc'), 'the id is computed from content, not supplied');
   assert.match(call.sql, /ON CONFLICT \(source, external_id, category\) DO NOTHING/);
-  assert.equal(call.params.length, 11);
+  assert.equal(call.params.length, 12);
   assert.equal(call.params[10], clock(), 'harvested_at comes from the injected clock');
+  assert.equal(call.params[11], null, 'no labels is a null facets column, never an empty object');
 });
 
 test('postgres: records without text or an external id never reach the database', async () => {

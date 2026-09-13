@@ -44,6 +44,8 @@ import type {
   WebhookAttemptResult,
   WebhookDelivery,
   WebhookDeliveryInput,
+  FacetCount,
+  FacetCountOptions,
 } from './types.ts';
 
 export interface CorpusDriver {
@@ -73,6 +75,14 @@ export interface CorpusDriver {
 
   /* Resolve receipt ids to records. The endpoint the whole product rests on. */
   getByReceiptIds(receiptIds: string[]): Promise<Doc[]>;
+
+  /*
+   * How many records in a category carry each value of one facet key, most
+   * records first, each value with a few receipt ids to open. Counts rows
+   * that carry the key at all, so the caller's denominator is the sum of the
+   * counts, not the category. A key no record carries returns an empty list.
+   */
+  facetCounts(category: string, key: string, options?: FacetCountOptions): Promise<FacetCount[]>;
 
   /* The warm/cold decision, and what a caller checks before spending. */
   categoryStats(category: string): Promise<CategoryStats>;

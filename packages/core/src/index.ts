@@ -17,5 +17,6 @@ export * from "./product-reviews.ts";
 export * from "./divergence.ts";
 export * from "./trend.ts";
 export * from "./themes.ts";
+export * from "./labelled.ts";
 export * from "./diff.ts";
 export * from "./compare.ts";

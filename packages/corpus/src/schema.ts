@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS docs (
   created_utc   INTEGER DEFAULT 0,
   harvested_at  INTEGER NOT NULL,
   embedding     BLOB,                   -- reserved: pgvector lands here later
+  facets        TEXT,                   -- json object of the source's own labels, null for most sources
   UNIQUE (source, external_id, category)
 );
 

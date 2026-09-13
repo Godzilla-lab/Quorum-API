@@ -123,6 +123,9 @@ export interface ReportClaims {
   /* Phrases the corpus keeps returning to that this caller did not ask about.
    * A candidate list carrying its receipts, never a set of findings. */
   themes: unknown[];
+  /* What the sources' own labels say, tallied with receipts. Optional so a
+   * claims implementation with no labelled source need not say so. */
+  labelled?: unknown[];
   /*
    * Model written claims, already through the fabrication gate, with what the
    * model tried to get away with counted. Null when the operator has not
@@ -325,6 +328,7 @@ export interface ReportSnapshot {
   trends: unknown[];
   voice: unknown[];
   themes: unknown[];
+  labelled: unknown[];
   diff: unknown;
   retrieval: unknown;
   warmth: unknown;
@@ -632,6 +636,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       trends: claims?.trends ?? [],
       voice: claims?.voice ?? [],
       themes: claims?.themes ?? [],
+      labelled: claims?.labelled ?? [],
       retrieval: outcome?.retrieval ?? null,
       warmth: outcome?.warmth ?? null,
       degraded: outcome?.degraded ?? [],

@@ -13,7 +13,7 @@
  */
 
 import {
-  assessSufficiency, corroborate, createCostMeter, discoverThemes, splitEvidenceRows,
+  assessSufficiency, corroborate, createCostMeter, discoverThemes, labelledBreakdowns, splitEvidenceRows,
   shareOfVoice, synthesiseAndResolve, trendFor, withEvidence,
   type AskModel, type ClaimWithEvidence, type RetrievalResult, type SynthesisReport, type Trend,
 } from '@quorum/core';
@@ -93,6 +93,8 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
    */
   const held = await corpus.byCategory(category, { limit: 1000 });
   const themes = discoverThemes(held, { exclude: [category, ...terms] });
+  /* What the sources' own labels say, tallied with receipts. See labelled.ts. */
+  const labelled = await labelledBreakdowns(corpus, category);
 
   /*
    * TREND, PER CALLER, FROM DATES ALREADY IN THE CORPUS.
@@ -168,6 +170,7 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
     sufficiency,
     trends,
     themes,
+    labelled,
     /* Built from the same counts the claims carry, so the two halves of one
      * report cannot disagree about how many records mention a term. */
     voice: shareOfVoice(claims.map((c) => ({ term: c.term, records: c.records })), warmth.docs),

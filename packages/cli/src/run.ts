@@ -21,12 +21,12 @@ import {
 import {
   adsForVerdict, assessSufficiency, attestedFindings, attestedSilence, compareSides, corroborate,
   createCostMeter, formatVerdict, notableGaps, productReviewDocs, retrieveAds, retrieveAll,
-  diffReports, discoverThemes, parseSnapshot, reportSnapshot, shareOfVoice, splitEvidenceRows,
+  diffReports, discoverThemes, labelledBreakdowns, parseSnapshot, reportSnapshot, shareOfVoice, splitEvidenceRows,
   synthesiseAndResolve, tierGap, trendFor, withEvidence,
   type AdRetrievalResult, type AskModel, type AttestedFindings, type AttestedSilence,
   type Comparison, type CompareSide,
   type ClaimWithEvidence, type CostLine, type FormatVerdict, type RetrievalResult,
-  type ReportDiff, type ShareOfVoice, type Sufficiency, type SynthesisReport, type Theme,
+  type LabelledBreakdown, type ReportDiff, type ShareOfVoice, type Sufficiency, type SynthesisReport, type Theme,
   type TierGap, type Trend,
 } from '@quorum/core';
 import type { CliOptions } from './args.ts';
@@ -201,6 +201,8 @@ export interface RunResult {
    * every entry carries its receipts and a reader can disagree in one request.
    */
   themes: Theme[];
+  /* What the sources' own labels say, tallied with receipts. See labelled.ts. */
+  labelled: LabelledBreakdown[];
   /*
    * The month this report answers as of, or null for now. Carried so a reader
    * of the json can never mistake a historical answer for a current one.
@@ -665,6 +667,7 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
     const themes = discoverThemes(held, {
       exclude: [category, resolvedSubject.title, ...options.terms],
     });
+    const labelled = await labelledBreakdowns(corpus, category);
 
     /*
      * TREND, FROM DATES WE HAVE ALWAYS STORED AND NEVER READ.
@@ -920,6 +923,7 @@ export async function runResearch(options: CliOptions, deps: RunDeps): Promise<R
       trends,
       voice,
       themes,
+      labelled,
       asOf: options.asOf ?? null,
       diff,
       comparison: null,

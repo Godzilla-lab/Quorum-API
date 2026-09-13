@@ -38,12 +38,12 @@
  * total. `no_aggs=true` drops the facet aggregations, which are two thirds of
  * the bytes and nothing this adapter reads.
  *
- * WHAT IS DELIBERATELY NOT STORED YET. Each complaint also carries the
- * product, the issue, the company's response category and whether it answered
- * on time. Those are facts a report could use, and they are on the permalink,
- * but the corpus has no column for them and the narrative must stay the
- * consumer's words alone. A facets column is a schema change and a decision
- * for later; the company name is the channel, which the corpus does hold.
+ * THE BUREAU'S LABELS TRAVEL AS FACETS, NOT AS TEXT. Each complaint carries
+ * the product, the issue, how the company closed it and whether it answered
+ * on time, all classified by the Bureau. They go in the record's `facets`
+ * (migration 007, 2026-09-13, added for exactly this source) so a report can
+ * count them with receipts, and never into the narrative, which stays the
+ * consumer's words alone. Keys are the Bureau's own field names.
  *
  * ONE COMPANY IS ONE CHANNEL, AND THAT IS THE HONEST READING. Corroboration
  * counts independent channels, and every complaint against Chime shares the
@@ -127,6 +127,20 @@ export function receivedAt(value: unknown): number | null {
 
 export function complaintUrl(id: string): string {
   return `${DETAIL}${id}`;
+}
+
+/*
+ * The Bureau's classification of a complaint, as facets. Only the fields
+ * that are labels: free text stays out, empty values stay out, and a
+ * complaint with no labels at all yields nothing rather than an empty object.
+ */
+export function labelsOf(c: CfpbComplaint): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const key of ['product', 'sub_product', 'issue', 'sub_issue', 'company_response', 'timely'] as const) {
+    const value = c[key];
+    if (typeof value === 'string' && value.trim()) out[key] = value.trim();
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 export interface CfpbOptions {
@@ -214,12 +228,14 @@ export function createCfpbSource(options: CfpbOptions = {}): Source {
         if (createdUtc === null) continue;
         const channel = (c.company ?? '').trim() || 'CFPB';
         if (!isRelevantRecord(text, channel, subject, { mode: 'phrase', phrases: subjectPhrases })) continue;
+        const facets = labelsOf(c);
         yield {
           source: 'cfpb',
           kind: 'post',
           externalId: id,
           channel,
           text,
+          ...(facets ? { facets } : {}),
           /* The Bureau counts nothing. Zero is the honest number, and the score
            * kind for this source says so, so it never renders as "no one agreed". */
           score: 0,

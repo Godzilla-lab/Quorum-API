@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { cleanNarrative, createCfpbSource, receivedAt, scrubControlCharacters } from './index.ts';
+import { cleanNarrative, createCfpbSource, labelsOf, receivedAt, scrubControlCharacters } from './index.ts';
 import { runSourceConformance } from '../conformance.ts';
 import { createThrottle } from '../throttle.ts';
 import type { Ctx, SourceRecord } from '../source.ts';
@@ -83,6 +83,11 @@ test('records are the consumer speaking, dated exactly, with a permalink to the 
     assert.ok(r.text.length >= 40);
   }
   assert.ok(new Set(records.map((r) => r.createdUtc)).size > 1, 'dates are per complaint');
+  for (const r of records) {
+    const f = (r as { facets?: Record<string, string> }).facets;
+    assert.ok(f && f['issue'] && f['product'] && f['company_response'] && f['timely'], `the Bureau's labels travel as facets: ${JSON.stringify(f)}`);
+    assert.doesNotMatch(r.text, new RegExp(f!['issue']!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'and never into the narrative');
+  }
   assert.ok(new Set(records.map((r) => r.externalId)).size === records.length, 'ids are per complaint');
 });
 
@@ -123,6 +128,13 @@ test('withinDays becomes a date floor on the request', async () => {
   for await (const _ of source.retrieve({ text: 'Chime fees', withinDays: 30 }, ctx())) { /* drain */ }
   const floor = new URL(calls[0]!).searchParams.get('date_received_min');
   assert.match(floor ?? '', /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('labels are only the Bureau\'s classification fields, trimmed, and absent when empty', () => {
+  assert.deepEqual(labelsOf({ product: ' Checking or savings account ', issue: 'Closing an account', timely: 'Yes', company: 'Chime', complaint_what_happened: 'text' }),
+    { product: 'Checking or savings account', issue: 'Closing an account', timely: 'Yes' });
+  assert.equal(labelsOf({ company: 'Chime', complaint_what_happened: 'text' }), null);
+  assert.equal(labelsOf({ issue: '   ' }), null);
 });
 
 test('narratives are cleaned without touching the redactions', () => {

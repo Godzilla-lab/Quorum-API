@@ -824,7 +824,7 @@ components:
 
     EvidenceRecord:
       type: object
-      required: [receiptId, source, tier, kind, externalId, category, channel, text, score, url, createdUtc, harvestedAt]
+      required: [receiptId, source, tier, kind, externalId, category, channel, text, score, url, createdUtc, harvestedAt, facets]
       properties:
         receiptId: { $ref: '#/components/schemas/ReceiptId' }
         source: { $ref: '#/components/schemas/SourceId' }
@@ -856,6 +856,16 @@ components:
         harvestedAt:
           type: integer
           description: Unix seconds when this entered the corpus.
+        facets:
+          description: |
+            Labels the source itself attached to this record, string to
+            string: the issue a regulator filed a complaint under, how the
+            company closed it. Absent or null for sources that have none.
+            Never part of the text, which stays the speaker's words.
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: { type: string }
 
     SourceSpread:
       type: object
@@ -1010,6 +1020,35 @@ components:
         clean:
           type: boolean
           description: True when the model invented nothing at all.
+
+    LabelledBreakdown:
+      type: object
+      required: [source, key, title, records, values]
+      properties:
+        source: { $ref: '#/components/schemas/SourceId' }
+        key:
+          type: string
+          description: The facet key, in the source's own vocabulary.
+        title:
+          type: string
+          description: What a reader sees. Names whose classification this is.
+        records:
+          type: integer
+          description: Records in the category carrying this key. The denominator.
+        values:
+          type: array
+          items:
+            type: object
+            required: [value, records, share, receiptIds]
+            properties:
+              value: { type: string }
+              records: { type: integer }
+              share:
+                type: number
+                description: records divided by the block's records, 0 to 1.
+              receiptIds:
+                type: array
+                items: { $ref: '#/components/schemas/ReceiptId' }
 
     Sufficiency:
       type: object
@@ -1682,6 +1721,16 @@ components:
             - type: 'null'
             - type: object
         sufficiency: { $ref: '#/components/schemas/Sufficiency' }
+        labelled:
+          type: array
+          description: |
+            What a source's own classification of its records says, tallied
+            with receipts: the issue the CFPB filed each complaint under, how
+            the company closed it. A label is not a claim and never promotes
+            one; the share is of the records carrying the key, and that total
+            is on the block. Empty when no held source carries labels, or when
+            fewer than ten records do.
+          items: { $ref: '#/components/schemas/LabelledBreakdown' }
         warmth: { $ref: '#/components/schemas/CategoryStats' }
         retrieval:
           oneOf:

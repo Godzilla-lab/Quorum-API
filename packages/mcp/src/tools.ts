@@ -63,7 +63,13 @@ const str = (value: unknown): string => (typeof value === 'string' ? value.trim(
 function quote(doc: Doc, maxChars = 240): string {
   const text = doc.text.replace(/\s+/g, ' ').trim();
   const excerpt = text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
-  return `> ${excerpt}\n> \n> \`${doc.receiptId}\` ${doc.source} ${doc.channel}`;
+  /* Labels the source itself attached, printed beside the words and never
+   * inside them: "issue: Closing an account; company_response: Closed with
+   * monetary relief" is the regulator's classification, not the speaker's. */
+  const labels = doc.facets
+    ? `\n> labels: ${Object.entries(doc.facets).map(([k, v]) => `${k}: ${v}`).join('; ')}`
+    : '';
+  return `> ${excerpt}\n> \n> \`${doc.receiptId}\` ${doc.source} ${doc.channel}${labels}`;
 }
 
 /* Records to channels ratio past which the spread itself is worth a warning:
