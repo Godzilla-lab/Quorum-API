@@ -38,6 +38,9 @@ export type SourceId =
   | 'youtube'
   | 'amazon'
   | 'review'
+  /* A consumer's own account, filed with a regulator and published after the
+   * company answered. Voice with good provenance, still one person's account. */
+  | 'cfpb'
   /* Tier D, context. Sets the scene and proves nothing alone. */
   | 'wikipedia'
   | 'gdelt'

@@ -130,6 +130,16 @@ const LIVE_CHECKS = [
     fetch: async () => (await getJson('https://hn.algolia.com/api/v1/search?query=running%20shoes&tags=comment&hitsPerPage=5')).hits,
   },
   {
+    source: 'cfpb',
+    /*
+     * The trailing slash on the base url and the absence of format=json are
+     * both load bearing, see the adapter header. `has_narrative` is listed
+     * because the adapter filters on it server side.
+     */
+    contract: { required: ['complaint_id', 'date_received', 'company', 'product', 'issue', 'complaint_what_happened', 'company_response', 'timely', 'has_narrative'] },
+    fetch: async () => (await getJson('https://www.consumerfinance.gov/data-research/consumer-complaints/search/api/v1/?search_term=credit%20card&field=complaint_what_happened&has_narrative=true&no_aggs=true&size=5')).hits.hits.map((h) => h._source),
+  },
+  {
     source: 'shopify/products.json',
     contract: { required: ['title', 'handle', 'variants', 'images', 'published_at', 'vendor'] },
     fetch: async () => (await getJson('https://www.allbirds.com/products.json?limit=5')).products,
@@ -246,6 +256,11 @@ const FIXTURE_CHECKS = [
     source: 'hackernews',
     contract: { required: ['objectID', 'comment_text', 'author', 'created_at_i'], absent: ['points'] },
     load: () => JSON.parse(readFileSync(join(ROOT, 'packages/sources/src/hackernews/fixtures/search-comments.json'), 'utf8')),
+  },
+  {
+    source: 'cfpb',
+    contract: { required: ['complaint_id', 'date_received', 'company', 'product', 'issue', 'complaint_what_happened', 'company_response', 'timely', 'has_narrative'] },
+    load: () => JSON.parse(readFileSync(join(ROOT, 'packages/sources/src/cfpb/fixtures/search.json'), 'utf8')).hits.hits.map((h) => h._source),
   },
   {
     source: 'cpsc',

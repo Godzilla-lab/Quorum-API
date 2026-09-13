@@ -64,6 +64,7 @@ export const SOURCE_TIER: Record<SourceId, EvidenceTier> = {
   youtube: 'C',
   amazon: 'C',
   review: 'C',
+  cfpb: 'C',
 
   wikipedia: 'D',
   gdelt: 'D',
@@ -127,6 +128,8 @@ export const SOURCE_SCORE_KIND: Record<SourceId, ScoreKind> = {
   youtube: 'points',
   amazon: 'stars',
   review: 'stars',
+  /* The Bureau counts nothing, and zero must never read as disagreement. */
+  cfpb: 'none',
 
   wikipedia: 'none',
   gdelt: 'none',

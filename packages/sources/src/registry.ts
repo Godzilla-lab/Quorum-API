@@ -18,6 +18,7 @@ import type { Source } from './source.ts';
 import { createAmazonReviewsSource } from './amazon-reviews/index.ts';
 import { createAppStoreSource } from './appstore/index.ts';
 import { createArcticShiftSource } from './reddit-arcticshift/index.ts';
+import { createCfpbSource } from './cfpb/index.ts';
 import { createCpscSource } from './cpsc/index.ts';
 import { createEuSafetyGateSource } from './eu-safety-gate/index.ts';
 import { createGithubIssuesSource } from './github-issues/index.ts';
@@ -48,9 +49,11 @@ import { createYoutubeSource } from './youtube/index.ts';
  * nhtsa 9s/0, eu-safety-gate 11s/0): low volume by nature, and openfda is
  * the second slowest source in the run for the fewest records. Amazon last
  * because it plans nothing without an ASIN and costs 0s when it does not.
+ * cfpb (added 2026-09-13, one search of about 1.3s per query) sits before
+ * reddit for the same reason the others do.
  */
 export const SOURCE_IDS = [
-  'hackernews', 'appstore', 'youtube', 'github', 'reddit', 'cpsc', 'sec-edgar', 'openfda', 'nhtsa', 'eu-safety-gate', 'amazon',
+  'hackernews', 'appstore', 'youtube', 'github', 'cfpb', 'reddit', 'cpsc', 'sec-edgar', 'openfda', 'nhtsa', 'eu-safety-gate', 'amazon',
 ] as const;
 
 /*
@@ -68,6 +71,7 @@ export function makeSource(id: string): Source {
     case 'reddit': return createArcticShiftSource();
     case 'hackernews': return createHackerNewsSource();
     case 'github': return createGithubIssuesSource();
+    case 'cfpb': return createCfpbSource();
     case 'cpsc': return createCpscSource();
     case 'openfda': return createOpenFdaSource();
     case 'nhtsa': return createNhtsaSource();

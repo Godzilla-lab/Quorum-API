@@ -13,7 +13,7 @@ rather than a README asserting it.
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D22.18-brightgreen.svg)](https://nodejs.org)
 [![npm](https://img.shields.io/npm/v/quorum-api.svg)](https://www.npmjs.com/package/quorum-api)
-[![Tests](https://img.shields.io/badge/tests-1%2C311-brightgreen.svg)](#development)
+[![Tests](https://img.shields.io/badge/tests-1%2C323-brightgreen.svg)](#development)
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-1-brightgreen.svg)](#requirements)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](spec/openapi.yaml)
 
@@ -157,7 +157,7 @@ does not resolve, the run exits non zero and says which one.
 
 | | |
 |---|---|
-| **Engine** | Working. 1,311 tests, offline and keyless |
+| **Engine** | Working. 1,323 tests, offline and keyless |
 | **CLI** | Working, every flag |
 | **MCP server** | Working, five tools over stdio, four of them also remote at `/mcp` |
 | **JavaScript SDK** | Working, 11 methods |
@@ -190,8 +190,8 @@ your behalf. `pg` earned its place by being a connection pool that survives a
 database restart, which is not a thing worth hand writing.
 
 No key is required for anything. Reddit through a public archive, Hacker News,
-the App Store and four government safety archives are all free and keyless. Keys
-only ever ADD sources (YouTube comments with a free API key, Amazon reviews and
+the App Store, the CFPB consumer complaint database and four government safety
+archives are all free and keyless. Keys only ever ADD sources (YouTube comments with a free API key, Amazon reviews and
 the Meta ad library through Apify), and a missing one degrades a run rather
 than failing it.
 
@@ -237,7 +237,7 @@ Working on Quorum itself is the clone path:
 git clone https://github.com/Godzilla-lab/Quorum-API && cd Quorum-API
 npm install
 npm run build
-npm test          # 1,311 tests, offline, no keys
+npm test          # 1,323 tests, offline, no keys
 ```
 
 Then research something. The input is a **subject**, not a URL. Plain text
@@ -778,7 +778,7 @@ npm run test:postgres  # the driver against a real server, needs QUORUM_PG_URL
 
 CI runs the test suite inside a network namespace with no route off the host, so
 an adapter that quietly reaches for the wire fails immediately instead of flaking
-later. Three of the 1,311 tests need a real PostgreSQL server and skip without
+later. Three of the 1,323 tests need a real PostgreSQL server and skip without
 `QUORUM_PG_URL`.
 
 ## License
@@ -807,6 +807,10 @@ This runs on archives other people maintain, most of them for free:
   recall data is what makes attested evidence possible
 - [SEC EDGAR](https://www.sec.gov/edgar), which asks callers to identify
   themselves and is the reason `QUORUM_CONTACT_EMAIL` exists
+- The [CFPB Consumer Complaint Database](https://www.consumerfinance.gov/data-research/consumer-complaints/),
+  17 million complaints under CC0 with the consumer's own account of what
+  happened, through its public search API: the voice tier for anything
+  financial, where forums are thin
 - The [YouTube Data API](https://developers.google.com/youtube/v3), used with a
   free key as documented: comments under review videos are buyers talking, at
   one quota unit per hundred comments against a 10,000 unit free day

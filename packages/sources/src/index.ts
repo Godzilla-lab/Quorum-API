@@ -34,6 +34,7 @@ export { runSourceConformance, fakeCostMeter, makeCtx } from './conformance.ts';
 export type { ConformanceCase } from './conformance.ts';
 
 export { createHackerNewsSource, decodeEntities } from './hackernews/index.ts';
+export { createCfpbSource, cleanNarrative, scrubControlCharacters } from './cfpb/index.ts';
 export type { HackerNewsOptions, HackerNewsHit } from './hackernews/index.ts';
 
 /* Tier A, attested. A named party stated this on the record to a regulator. */
