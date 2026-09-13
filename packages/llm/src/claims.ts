@@ -61,7 +61,12 @@ const ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
  * self hoster nothing.
  */
 export const CLAIMS_MODELS = [
-  'nvidia/nemotron-nano-9b-v2:free',
+  /*
+   * nvidia/nemotron-nano-9b-v2:free WAS RUNG ONE AND IS GONE. Every one of 37
+   * hosted reports stored on 2026-08-27 opens its synthesis error with
+   * "nemotron-nano-9b-v2:free: status 404": OpenRouter withdrew it. A rung
+   * that always 404s costs a round trip per report for nothing, so it is out.
+   */
   'z-ai/glm-5.2:free',
   'liquid/lfm-2.5-2.6b:free',
 ] as const;
@@ -98,7 +103,17 @@ export interface ClaimsTransport {
 export interface ClaimsOptions {
   /* One model instead of the fallback list. Used by --synthesis-model. */
   model?: string;
+  /* Per attempt. Each rung of the list gets up to this long. */
   timeoutMs?: number;
+  /*
+   * FOR THE WHOLE LIST, because the per attempt timeout multiplies by the
+   * list. Measured over 37 hosted reports stored 2026-08-27: the free pool
+   * answering slowly held reports 160s to 556s AFTER retrieval had finished,
+   * and most of those ended with no claims at all. A rung is given the
+   * smaller of its own timeout and what is left of this; a rung that would
+   * start with nothing left is not attempted and is reported as such.
+   */
+  totalBudgetMs?: number;
   post: ClaimsTransport;
 }
 
@@ -157,8 +172,15 @@ export function askClaims(env: Env, options: ClaimsOptions): AskModel {
 
     const models = options.model ? [options.model] : [...CLAIMS_MODELS];
     const attempts: string[] = [];
+    const perAttemptMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const budgetEndsAt = options.totalBudgetMs ? Date.now() + options.totalBudgetMs : null;
 
     for (const model of models) {
+      const remainingMs = budgetEndsAt === null ? perAttemptMs : budgetEndsAt - Date.now();
+      if (remainingMs <= 0) {
+        attempts.push(`${model}: not attempted, the ${options.totalBudgetMs}ms synthesis budget was spent`);
+        continue;
+      }
       /*
        * THE TRANSPORT CAN THROW BEFORE IT CAN FAIL. Errors are values on the
        * result anywhere a vendor can be down, and the transport is part of
@@ -172,7 +194,7 @@ export function askClaims(env: Env, options: ClaimsOptions): AskModel {
       try {
         response = await options.post(ENDPOINT, {
           headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-          timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          timeoutMs: Math.min(perAttemptMs, remainingMs),
           body: JSON.stringify({
             model,
             messages: [

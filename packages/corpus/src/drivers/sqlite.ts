@@ -684,7 +684,9 @@ export function openSqliteCorpus(options: SqliteCorpusOptions): CorpusDriver {
       db.prepare(`
         INSERT INTO report_snapshots (report_id, tenant_id, category, status, payload, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(report_id) DO NOTHING
+        ON CONFLICT(report_id) DO UPDATE
+          SET status = excluded.status, payload = excluded.payload
+          WHERE report_snapshots.status IN ('queued', 'running')
       `).run(
         snapshot.reportId,
         snapshot.tenantId ?? null,

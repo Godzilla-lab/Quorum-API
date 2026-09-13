@@ -616,12 +616,14 @@ export function openPostgresCorpus(options: PostgresCorpusOptions): CorpusDriver
       }));
     },
 
-    /* Idempotent on the report id. See the driver interface. */
+    /* Replaces a provisional row, never a terminal one. See the driver interface. */
     async saveReportSnapshot(snapshot: ReportSnapshotInput): Promise<void> {
       await sql.query(
         `INSERT INTO report_snapshots (report_id, tenant_id, category, status, payload, created_at)
          VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (report_id) DO NOTHING`,
+         ON CONFLICT (report_id) DO UPDATE
+           SET status = EXCLUDED.status, payload = EXCLUDED.payload
+           WHERE report_snapshots.status IN ('queued', 'running')`,
         [
           snapshot.reportId, snapshot.tenantId ?? null, snapshot.category,
           snapshot.status, snapshot.payload, nowSeconds(),

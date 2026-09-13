@@ -133,3 +133,53 @@ test('a model being down costs the prose and nothing else', async () => {
     assert.equal(synthesis.costUsd, 0, 'a failed call charges nothing');
   } finally { await corpus.close(); }
 });
+
+/* ------------------------------------------------------------------ */
+/* the provisional report                                              */
+/* ------------------------------------------------------------------ */
+
+test('the arithmetic is announced before the model is asked, and is the final report minus synthesis', async () => {
+  const corpus = await seeded();
+  const order: string[] = [];
+  const captured: Awaited<ReturnType<typeof computeClaims>>[] = [];
+  const ask: AskModel = async () => {
+    order.push('model asked');
+    return {
+      ok: true, model: 'test/model',
+      json: { claims: [{ term: 'sizing', claim: 'Buyers consistently report this runs small.', evidence_ids: ['c0', 'c1', 'c2'] }] },
+      usage: { inputTokens: 10, outputTokens: 1 },
+    };
+  };
+  try {
+    const final = await computeClaims({
+      corpus, category: 'running shoes', terms: ['sizing'],
+      retrieval: null, subjectResolved: false,
+      askModel: ask,
+      onProvisional: (claims) => { order.push('announced'); captured.push(claims); },
+    });
+    assert.deepEqual(order, ['announced', 'model asked'], 'findings go out before the slow step starts');
+    assert.equal(captured.length, 1, 'the callback ran once');
+    const p = captured[0]!;
+    assert.equal(p.synthesis, null);
+    assert.deepEqual(p.findings, final.findings, 'the model cannot change a finding');
+    assert.deepEqual(p.weakSignals, final.weakSignals);
+    assert.deepEqual(p.trends, final.trends);
+    assert.deepEqual(p.voice, final.voice);
+    assert.ok(final.synthesis, 'the final report carries the model block');
+    const cited = (c: { receiptCheck: unknown }) => (c.receiptCheck as { cited: number }).cited;
+    assert.ok(cited(final) >= cited(p), 'the final check covers the model receipts too');
+  } finally { await corpus.close(); }
+});
+
+test('without a model there is no slow step, so nothing is announced', async () => {
+  const corpus = await seeded();
+  let announced = 0;
+  try {
+    await computeClaims({
+      corpus, category: 'running shoes', terms: ['sizing'],
+      retrieval: null, subjectResolved: false,
+      onProvisional: () => { announced++; },
+    });
+    assert.equal(announced, 0);
+  } finally { await corpus.close(); }
+});

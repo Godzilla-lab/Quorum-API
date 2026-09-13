@@ -950,7 +950,28 @@ export function createReceiptsServer(options: ServerOptions): Server {
           if (ctx.headers['if-none-match'] === etag) {
             return { status: 304, body: null, headers: { etag } };
           }
-          return { status: 200, headers: { etag }, body: JSON.parse(stored.payload) };
+          const body = JSON.parse(stored.payload) as ReportSnapshot;
+          /*
+           * A PROVISIONAL ROW WITH NOTHING IN MEMORY BEHIND IT MEANS THE
+           * PROCESS DIED MID REPORT. Before 2026-09-13 that was a 404, which
+           * reads as "your report never existed" after minutes of waiting.
+           * Records already retrieved stayed in the corpus, so the honest
+           * answer is: interrupted, this much is held, ask again. Whatever
+           * findings had landed stay in the body, because they were computed
+           * from records that are still there.
+           */
+          if (stored.status === 'queued' || stored.status === 'running') {
+            const held = await corpus.categoryStats(stored.category).catch(() => null);
+            const kept = held
+              ? `${held.docs} records are held for ${JSON.stringify(stored.category)}`
+              : 'records already retrieved were kept';
+            body.status = 'failed';
+            body.error = {
+              type: 'interrupted',
+              message: `the instance restarted while this report was ${stored.status}; ${kept}, so resubmitting the same request continues from there`,
+            };
+          }
+          return { status: 200, headers: { etag }, body };
         }
 
         /*

@@ -133,11 +133,10 @@ test('a 429 falls over, because the free pool is rate limited upstream', async (
    * upstream" on consecutive calls a second apart. */
   const { post, sent } = transport(
     { ok: false, status: 429, body: '' },
-    { ok: false, status: 429, body: '' },
     { body: answer('{"claims":[]}') },
   );
   const result = await askClaims(ENV, { post })(REQUEST);
-  assert.equal(sent.length, 3);
+  assert.equal(sent.length, 2, 'the list is two long since the withdrawn rung was dropped');
   assert.equal(result.ok, true);
 });
 
@@ -217,4 +216,36 @@ test('every default model has a verified rate, so the free path prints no warnin
       assert.equal(rate.out, 0, `${model} is in the free default list at a non zero rate`);
     }
   }
+});
+
+/* ------------------------------------------------------------------ */
+/* the total budget                                                    */
+/* ------------------------------------------------------------------ */
+
+test('a total budget bounds the whole list, not each rung', async () => {
+  /* A transport that takes as long as it is allowed, and reports it. */
+  const sent: { timeoutMs: number }[] = [];
+  const post = async (_url: string, init: { timeoutMs: number }) => {
+    sent.push({ timeoutMs: init.timeoutMs });
+    await new Promise((resolve) => { setTimeout(resolve, init.timeoutMs); });
+    return { ok: false, status: 429, body: '' };
+  };
+  const ask = askClaims(ENV, { post, timeoutMs: 40, totalBudgetMs: 60 });
+  const started = Date.now();
+  const result = await ask(REQUEST);
+  const elapsed = Date.now() - started;
+
+  assert.equal(result.ok, false);
+  assert.ok(sent.length >= 1 && sent.length <= 2, `${sent.length} attempts for a two model list`);
+  assert.equal(sent[0]?.timeoutMs, 40, 'the first rung gets its full per attempt timeout');
+  if (sent[1]) assert.ok(sent[1].timeoutMs <= 20, `the second rung gets what is left, got ${sent[1].timeoutMs}ms`);
+  assert.ok(elapsed < 200, `the list stayed inside the budget, took ${elapsed}ms`);
+  assert.match(String((result as { error?: string }).error ?? ''), /budget was spent|429/, 'every reason is reported');
+});
+
+test('without a total budget every rung keeps its own timeout, as before', async () => {
+  const { post, sent } = transport({ ok: false, status: 429, body: '' }, { ok: false, status: 429, body: '' });
+  const ask = askClaims(ENV, { post, timeoutMs: 1234 });
+  await ask(REQUEST);
+  assert.deepEqual(sent.map((s) => s.timeoutMs), [1234, 1234]);
 });

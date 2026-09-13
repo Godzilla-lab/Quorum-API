@@ -124,11 +124,12 @@ const MAX_CLAIMS_BYTES = 4 * 1024 * 1024;
 
 export function askClaimsLive(
   env: Env,
-  options: { model?: string; timeoutMs?: number; signal?: AbortSignal } = {},
+  options: { model?: string; timeoutMs?: number; totalBudgetMs?: number; signal?: AbortSignal } = {},
 ): AskModel {
   return askClaims(env, {
     ...(options.model ? { model: options.model } : {}),
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.totalBudgetMs ? { totalBudgetMs: options.totalBudgetMs } : {}),
     post: async (url, init) => {
       const result = await safeFetch(url, {
         method: 'POST',

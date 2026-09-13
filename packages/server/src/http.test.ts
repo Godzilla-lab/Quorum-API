@@ -351,6 +351,38 @@ test('A REPORT THE QUEUE HAS FORGOTTEN IS SERVED FROM ITS PERSISTED SNAPSHOT', a
   } finally { await s.close(); }
 });
 
+/*
+ * A provisional snapshot with nothing in memory behind it is a report the
+ * process died in the middle of. Before this it was a 404 after minutes of
+ * waiting; now it says what happened and what is still there.
+ */
+test('A REPORT INTERRUPTED BY A RESTART IS SERVED AS INTERRUPTED, NOT AS A 404', async () => {
+  const s = await live({ withQueue: true });
+  try {
+    await s.corpus.addDocs([
+      { source: 'reddit', kind: 'comment', externalId: 'kept-1', channel: 'shoes', text: 'these shoes run small', score: 1, url: 'https://e.test/1', createdUtc: 1_700_000_000 },
+    ], 'shoes');
+    const payload = JSON.stringify({
+      id: 'rep_0123456789abcdee', status: 'running',
+      findings: [{ term: 'sizing', verdict: 'finding' }], error: null,
+    }, null, 2);
+    await s.corpus.saveReportSnapshot({
+      reportId: 'rep_0123456789abcdee', tenantId: 'key-0', category: 'shoes',
+      status: 'running', payload,
+    });
+
+    const res = await fetch(`${s.base}/v1/reports/rep_0123456789abcdee`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { status: string; findings: unknown[]; error: { type: string; message: string } };
+    assert.equal(body.status, 'failed', 'nothing will ever advance it, so it is terminal');
+    assert.equal(body.error.type, 'interrupted');
+    assert.match(body.error.message, /restarted while this report was running/);
+    assert.match(body.error.message, /\d+ records are held for "shoes"/, 'what survived is stated, so the caller knows a resubmit is cheaper');
+    assert.equal(body.findings.length, 1, 'findings that had landed are still served');
+    assert.equal(res.headers.get('retry-after'), null);
+  } finally { await s.close(); }
+});
+
 test('AN UNCHANGED REPORT IS A 304, SO POLLING COSTS NOTHING', async () => {
   const s = await live({ withQueue: true });
   try {

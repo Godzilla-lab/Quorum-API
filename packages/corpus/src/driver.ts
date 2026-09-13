@@ -123,10 +123,17 @@ export interface CorpusDriver {
 
   /*
    * Report snapshots: the exact bytes the API served, keyed by the API's
-   * report id, so GET /v1/reports/{id} survives a restart. Idempotent on the
-   * report id, like webhook deliveries and for the same reason: a report
-   * reaches a terminal state once, and if that ever happened twice the second
-   * write must not replace what a caller may have already fetched.
+   * report id, so GET /v1/reports/{id} survives a restart.
+   *
+   * A snapshot whose stored status is `queued` or `running` is PROVISIONAL
+   * and a later write replaces it: the queue writes one when a report is
+   * accepted, again when its findings land, and finally at the terminal
+   * state, so a restart in between leaves an id that resolves instead of a
+   * 404. A TERMINAL snapshot is never replaced, like webhook deliveries and
+   * for the same reason: a report reaches a terminal state once, and if that
+   * ever happened twice the second write must not replace what a caller may
+   * have already fetched. `created_at` is set by the first write and kept,
+   * so the quota replay counts a report from when it was accepted.
    */
   saveReportSnapshot(snapshot: ReportSnapshotInput): Promise<void>;
   getReportSnapshot(reportId: string): Promise<StoredReportSnapshot | null>;

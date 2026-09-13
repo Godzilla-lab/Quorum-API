@@ -769,7 +769,7 @@ components:
           properties:
             type:
               type: string
-              enum: [invalid_request, unauthorized, not_found, gone, conflict, rate_limited, spend_cap_reached, queue_saturated, internal]
+              enum: [invalid_request, unauthorized, not_found, gone, conflict, rate_limited, spend_cap_reached, queue_saturated, internal, interrupted]
             message:
               type: string
               description: |

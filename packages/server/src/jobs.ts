@@ -148,7 +148,17 @@ export interface QueueOptions {
    */
   /* The key label rides along because synthesis is metered per caller, and
    * the quota to check and charge is that caller's, never the run's. */
-  claimsFor(outcome: RunOutcome, terms: readonly string[], keyLabel: string): Promise<ReportClaims>;
+  claimsFor(
+    outcome: RunOutcome,
+    terms: readonly string[],
+    keyLabel: string,
+    /*
+     * Called with the arithmetic claims before any slow step, so the queue can
+     * publish findings while the rest is still computing. An implementation
+     * with no slow step never calls it, and the queue copes.
+     */
+    onProvisional: (claims: ReportClaims) => Promise<void>,
+  ): Promise<ReportClaims>;
   /*
    * How many retrievals may run at once, across every caller.
    *
@@ -200,6 +210,7 @@ export interface QueueOptions {
     reportId: string;
     tenantId: string;
     category: string;
+    /* queued | running while provisional, then the terminal status. */
     status: string;
     payload: string;
   }): Promise<void>;
@@ -400,6 +411,28 @@ export function createJobQueue(options: QueueOptions): JobQueue {
   };
 
   /*
+   * A PROVISIONAL SNAPSHOT, written when a report is accepted, when its
+   * findings land, and when it is cancelled. The drivers replace a queued or
+   * running row and never a terminal one, so a late write from here can never
+   * overwrite what `finishReport` persisted. Fire and forget on the accept
+   * path, awaited where the caller can wait; a write that fails must not
+   * fail the report, which is readable in memory regardless.
+   */
+  async function persistState(report: Report): Promise<void> {
+    if (!options.persistSnapshot) return;
+    const snap = snapshot(report);
+    try {
+      await options.persistSnapshot({
+        reportId: report.id,
+        tenantId: report.keyLabel,
+        category: snap.category,
+        status: report.status,
+        payload: JSON.stringify(snap, null, 2),
+      });
+    } catch { /* see above */ }
+  }
+
+  /*
    * The single terminal path for a report, and therefore the one place a
    * webhook is recorded.
    *
@@ -469,8 +502,23 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       if (!report || report.status === 'cancelled') continue;
       if (!outcome) { await finishReport(report, 'failed', run.error ?? 'the run did not complete'); continue; }
       try {
-        report.claims = await options.claimsFor(outcome, report.request.terms, report.keyLabel);
-        for (const finding of report.claims.findings) emit(report, 'finding', finding);
+        /*
+         * FINDINGS GO OUT THE MOMENT THE ARITHMETIC IS DONE. The spec has
+         * promised since v1 that findings on a running report are provisional
+         * and may grow; until 2026-09-13 they were written once, at the end,
+         * behind whatever synthesis took. The provisional snapshot is what a
+         * restart during synthesis serves instead of a 404.
+         */
+        let announced = false;
+        const announce = async (claims: ReportClaims): Promise<void> => {
+          if (report.status === 'cancelled') return;
+          report.claims = claims;
+          for (const finding of claims.findings) emit(report, 'finding', finding);
+          announced = true;
+          await persistState(report);
+        };
+        report.claims = await options.claimsFor(outcome, report.request.terms, report.keyLabel, announce);
+        if (!announced) for (const finding of report.claims.findings) emit(report, 'finding', finding);
         await finishReport(report, 'complete', null);
       } catch (cause) {
         await finishReport(report, 'failed', cause instanceof Error ? cause.message : String(cause));
@@ -559,7 +607,8 @@ export function createJobQueue(options: QueueOptions): JobQueue {
       termsDeferred: report.termsDeferred,
       /* Empty rather than absent while running. A poller showing progress needs
        * the key to exist; the spec promises findings never shrink, and they
-       * cannot, because they are only ever written once at completion. */
+       * cannot: the arithmetic writes them once, and synthesis only adds its
+       * own block beside them. */
       findings: claims?.findings ?? [],
       weakSignals: claims?.weakSignals ?? [],
       rejected: claims?.rejected ?? [],
@@ -732,6 +781,8 @@ export function createJobQueue(options: QueueOptions): JobQueue {
        * registration cannot be interleaved by another submit. This is the first
        * await and it touches nothing. */
       pump();
+      /* Accepted, so it has an id a caller may already hold. See persistState. */
+      void persistState(report);
 
       /*
        * AN ESTIMATE THAT CANNOT BE COMPUTED IS NULL, NEVER A REFUSAL. The
@@ -769,6 +820,7 @@ export function createJobQueue(options: QueueOptions): JobQueue {
         report.completedAt = now();
         emit(report, 'done', { status: 'cancelled' });
         report.run.reports.delete(id);
+        void persistState(report);
         /*
          * THE RUN STOPS ONLY WHEN THE LAST REPORT DETACHES. Cancelling a
          * coalesced report must not cancel a run somebody else is waiting on,

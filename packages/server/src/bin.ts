@@ -348,7 +348,7 @@ const queue = createJobQueue({
    * the metered leg lives HERE, per report and per key, where a caller's
    * refusal cannot be laundered through a coalesced run.
    */
-  claimsFor: async (outcome, terms, keyLabel) => {
+  claimsFor: async (outcome, terms, keyLabel, onProvisional) => {
     const spend = synthesisReady ? quotas.canSpend(keyLabel) : null;
     const subject = outcome.subject as { title?: string } | null;
     const result = await computeClaims({
@@ -357,11 +357,21 @@ const queue = createJobQueue({
       terms,
       retrieval: outcome.retrieval as RetrievalResult | null,
       subjectResolved: outcome.subjectResolved,
+      onProvisional,
       ...(spend?.allowed === true
         ? {
           askModel: askClaimsLive(process.env, {
             ...(synthesisModel ? { model: synthesisModel } : {}),
-            timeoutMs: 120_000,
+            /*
+             * 60s a rung and 90s for the list. This was 120s a rung with no
+             * total, and over 37 hosted reports stored 2026-08-27 the free
+             * pool held reports 160s to 556s after retrieval, most ending
+             * with no claims. Findings are published before this starts, so
+             * the budget bounds how long `complete` trails them, not how long
+             * a caller waits for evidence.
+             */
+            timeoutMs: 60_000,
+            totalBudgetMs: 90_000,
           }),
           ...(subject?.title ? { subjectTitle: subject.title } : {}),
         }
@@ -378,9 +388,13 @@ const queue = createJobQueue({
   },
 
   /*
-   * The exact GET bytes, durably, so a finished report survives the restart
-   * this tier is guaranteed to take. The queue evicts terminal reports after
-   * an hour and the GET handler falls back to this row.
+   * The exact GET bytes, durably, so a report survives the restart this tier
+   * is guaranteed to take. Written provisionally when a report is accepted
+   * and when its findings land, then finally at the terminal state; the
+   * driver never lets a provisional write replace a terminal one. The queue
+   * evicts terminal reports after an hour and the GET handler falls back to
+   * this row, and a row still marked queued or running when nothing in
+   * memory knows the id is served as interrupted rather than as a 404.
    */
   persistSnapshot: (snap) => corpus.saveReportSnapshot(snap),
 

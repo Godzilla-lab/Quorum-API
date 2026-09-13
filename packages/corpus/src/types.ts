@@ -217,7 +217,7 @@ export interface ReportSnapshotInput {
   /* Snapshots are tenant owned, like reports. See the tenant boundary note. */
   tenantId?: string | null;
   category: string;
-  /* The terminal status: complete | failed | cancelled. */
+  /* queued | running while provisional, then complete | failed | cancelled. */
   status: string;
   /* The exact bytes GET /v1/reports/{id} served for this report. */
   payload: string;

@@ -53,6 +53,17 @@ export interface ClaimsInput {
   askModel?: AskModel;
   /* What to call the subject in the prompt. Falls back to the category. */
   subjectTitle?: string;
+  /*
+   * CALLED WITH THE FINISHED ARITHMETIC BEFORE SYNTHESIS STARTS, and only
+   * when synthesis is going to run, because that is the only wait worth
+   * announcing. Measured over 37 hosted reports stored 2026-08-27: the free
+   * model pool held reports 160s to 556s after retrieval, and the findings
+   * those callers were waiting on had been computable the whole time. The
+   * claims handed here are exactly the final claims minus the `synthesis`
+   * block, so the spec's promise holds: findings on a running report may
+   * grow and never shrink.
+   */
+  onProvisional?: (claims: ReportClaims) => Promise<void> | void;
 }
 
 export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
@@ -71,57 +82,6 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
     /* The same rows that produced the count produce the sample, so a quote can
      * never come from a record that was not counted. */
     claims.push(withEvidence(corroborate(term, rows, { refuting }), rows));
-  }
-
-  /*
-   * The records handed to the model are exactly the rows that produced the
-   * counts above, deduped by receipt id, same rule as the CLI: a model
-   * reasoning over evidence the counts never saw could cite a record the
-   * report cannot account for. Cost is computed from the tokens the provider
-   * reported and returned to the caller, who owns the quota to charge.
-   */
-  let synthesis: (SynthesisReport & { costUsd: number }) | null = null;
-  if (input.askModel) {
-    const forModel = [...new Map(
-      [...termRows.values()].flat().map((r) => [r.receiptId, r]),
-    ).values()];
-    /*
-     * A SYNTHESIS FAILURE COSTS THE PROSE AND NOTHING ELSE. The layers below
-     * already return errors as values, and this catch is the belt for
-     * whatever they have not met yet: the first production synthesis attempt
-     * (2026-08-24) failed a customer's whole report because a malformed env
-     * var made the transport throw at request build time. The arithmetic
-     * findings above owed that caller nothing model shaped.
-     */
-    try {
-      const report = await synthesiseAndResolve(
-        { subject: input.subjectTitle ?? category, terms: [...terms], records: forModel },
-        input.askModel,
-        corpus,
-      );
-      const meter = createCostMeter({ label: 'quorum-hosted-synthesis' });
-      if (report.model && report.usage) {
-        meter.usage(report.model, {
-          input_tokens: report.usage.inputTokens,
-          output_tokens: report.usage.outputTokens,
-        });
-      }
-      synthesis = { ...report, costUsd: meter.total() };
-    } catch (cause) {
-      synthesis = {
-        model: null,
-        claims: [],
-        fabrication: {
-          claimsChecked: 0, idsCited: 0, idsFabricated: 0,
-          quotesChecked: 0, quotesUnsupported: 0, claimsRejected: 0, clean: true,
-        },
-        discarded: [],
-        evidence: { records: 0, truncated: 0, characters: 0 },
-        usage: null,
-        error: cause instanceof Error ? cause.message : 'synthesis failed',
-        costUsd: 0,
-      };
-    }
   }
 
   const warmth = await corpus.categoryStats(category);
@@ -178,6 +138,9 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
    * check goes in now while it costs nothing rather than being built under
    * pressure later.
    */
+  const assemble = async (
+    synthesis: (SynthesisReport & { costUsd: number }) | null,
+  ): Promise<ReportClaims> => {
   const cited = [...new Set([
     ...findings.flatMap((c) => c.receiptIds),
     /* The samples are printed too, so their ids are cited in every sense that
@@ -214,4 +177,67 @@ export async function computeClaims(input: ClaimsInput): Promise<ReportClaims> {
       unresolved: cited.filter((id) => !resolvedIds.has(id)),
     },
   };
+  };
+
+  /*
+   * ARITHMETIC FIRST, ANNOUNCED, THEN THE MODEL. The provisional report is
+   * the final report with `synthesis: null`; nothing below can change a
+   * finding, a count or a receipt, only add the model's block beside them.
+   */
+  const provisional = await assemble(null);
+  if (!input.askModel) return provisional;
+  if (input.onProvisional) await input.onProvisional(provisional);
+
+  /*
+   * The records handed to the model are exactly the rows that produced the
+   * counts above, deduped by receipt id, same rule as the CLI: a model
+   * reasoning over evidence the counts never saw could cite a record the
+   * report cannot account for. Cost is computed from the tokens the provider
+   * reported and returned to the caller, who owns the quota to charge.
+   */
+  let synthesis: (SynthesisReport & { costUsd: number }) | null = null;
+  if (input.askModel) {
+    const forModel = [...new Map(
+      [...termRows.values()].flat().map((r) => [r.receiptId, r]),
+    ).values()];
+    /*
+     * A SYNTHESIS FAILURE COSTS THE PROSE AND NOTHING ELSE. The layers below
+     * already return errors as values, and this catch is the belt for
+     * whatever they have not met yet: the first production synthesis attempt
+     * (2026-08-24) failed a customer's whole report because a malformed env
+     * var made the transport throw at request build time. The arithmetic
+     * findings above owed that caller nothing model shaped.
+     */
+    try {
+      const report = await synthesiseAndResolve(
+        { subject: input.subjectTitle ?? category, terms: [...terms], records: forModel },
+        input.askModel,
+        corpus,
+      );
+      const meter = createCostMeter({ label: 'quorum-hosted-synthesis' });
+      if (report.model && report.usage) {
+        meter.usage(report.model, {
+          input_tokens: report.usage.inputTokens,
+          output_tokens: report.usage.outputTokens,
+        });
+      }
+      synthesis = { ...report, costUsd: meter.total() };
+    } catch (cause) {
+      synthesis = {
+        model: null,
+        claims: [],
+        fabrication: {
+          claimsChecked: 0, idsCited: 0, idsFabricated: 0,
+          quotesChecked: 0, quotesUnsupported: 0, claimsRejected: 0, clean: true,
+        },
+        discarded: [],
+        evidence: { records: 0, truncated: 0, characters: 0 },
+        usage: null,
+        error: cause instanceof Error ? cause.message : 'synthesis failed',
+        costUsd: 0,
+      };
+    }
+  }
+
+  return assemble(synthesis);
 }

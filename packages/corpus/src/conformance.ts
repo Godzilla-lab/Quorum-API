@@ -800,6 +800,21 @@ export function runConformanceSuite(
     });
   });
 
+  test(`${driverName}: a provisional snapshot is replaced and a terminal one is not`, async () => {
+    await withCorpus(async (c) => {
+      const id = 'rep_bbbbbbbbbbbbbbbb';
+      await c.saveReportSnapshot({ reportId: id, category: 'running shoes', status: 'queued', payload: 'accepted' });
+      await c.saveReportSnapshot({ reportId: id, category: 'running shoes', status: 'running', payload: 'findings landed' });
+      assert.equal((await c.getReportSnapshot(id))?.payload, 'findings landed',
+        'a running report advances, so its provisional snapshot must follow it');
+      await c.saveReportSnapshot({ reportId: id, category: 'running shoes', status: 'complete', payload: 'final' });
+      await c.saveReportSnapshot({ reportId: id, category: 'running shoes', status: 'running', payload: 'stale replay' });
+      const stored = await c.getReportSnapshot(id);
+      assert.equal(stored?.status, 'complete');
+      assert.equal(stored?.payload, 'final', 'nothing rewrites a terminal snapshot, not even a late provisional write');
+    });
+  });
+
   test(`${driverName}: report counts since a cutoff, per tenant, for the quota replay`, async () => {
     await withClock(async (c, clock) => {
       await c.saveReportSnapshot({

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   coalescingKey, createJobQueue,
-  type JobQueue, type ReportRequest, type RunContext, type RunOutcome,
+  type JobQueue, type ReportClaims, type ReportRequest, type RunContext, type RunOutcome,
 } from './jobs.ts';
 
 function request(over: Partial<ReportRequest> = {}): ReportRequest {
@@ -587,12 +587,63 @@ test('a finished report is persisted with the exact bytes GET serves', async () 
   runner.finish();
   await settled();
 
-  assert.equal(saved.length, 1);
-  assert.equal(saved[0]?.reportId, id);
-  assert.equal(saved[0]?.tenantId, 'key-a', 'snapshots are tenant owned');
-  assert.equal(saved[0]?.status, 'complete');
-  assert.equal(saved[0]?.payload, JSON.stringify(q.get(id), null, 2),
+  /* One provisional write on accept, one terminal write. */
+  assert.deepEqual(saved.map((s) => s.status), ['running', 'complete']);
+  const last = saved.at(-1);
+  assert.equal(last?.reportId, id);
+  assert.equal(last?.tenantId, 'key-a', 'snapshots are tenant owned');
+  assert.equal(last?.payload, JSON.stringify(q.get(id), null, 2),
     'byte identical to the GET body, or the fallback serves a different report than the API did');
+});
+
+test('findings are published and persisted the moment the arithmetic lands, before the slow step', async () => {
+  const saved: { status: string; payload: string }[] = [];
+  let finishSlowStep!: () => void;
+  const slowStep = new Promise<void>((resolve) => { finishSlowStep = resolve; });
+  const claimsFor = async (_o: RunOutcome, terms: readonly string[], _k: string, onProvisional: (c: ReportClaims) => Promise<void>) => {
+    const claims: ReportClaims = {
+      findings: terms.map((t) => ({ term: t, verdict: 'finding' })),
+      contested: [], refuted: [], weakSignals: [], rejected: [],
+      sufficiency: { verdict: 'sufficient' },
+      receiptCheck: { cited: 0, resolved: 0, unresolved: [] },
+      trends: [], voice: [], themes: [],
+    };
+    await onProvisional(claims);
+    await slowStep;
+    return { ...claims, synthesis: { model: 'test' } };
+  };
+  const { q, runner } = queue({ claimsFor, persistSnapshot: async (s) => { saved.push(s); } });
+  const accepted = await q.submit(request(), { keyLabel: 'key-a' });
+  const id = (accepted as { accepted: { id: string } }).accepted.id;
+  runner.finish();
+  await settled();
+
+  const midway = q.get(id)!;
+  assert.equal(midway.status, 'running', 'the slow step has not finished');
+  assert.deepEqual(midway.findings, [{ term: 'quality', verdict: 'finding' }], 'findings are readable while it runs');
+  assert.equal(midway.synthesis, null);
+  assert.ok(q.eventsSince(id, 0)!.some((e) => e.type === 'finding'), 'the finding event went out early');
+  assert.deepEqual(saved.map((s) => s.status), ['running', 'running'], 'accepted, then findings landed');
+  assert.match(saved.at(-1)!.payload, /"quality"/, 'the provisional snapshot carries the findings');
+
+  finishSlowStep();
+  await settled();
+  const done = q.get(id)!;
+  assert.equal(done.status, 'complete');
+  assert.deepEqual(done.findings, midway.findings, 'findings never shrink, and here they did not change at all');
+  assert.deepEqual((done.synthesis as { model: string }).model, 'test');
+  assert.equal(saved.at(-1)?.status, 'complete');
+  assert.equal(q.eventsSince(id, 0)!.filter((e) => e.type === 'finding').length, 1, 'a finding is announced once');
+});
+
+test('a cancelled report persists its cancelled state', async () => {
+  const saved: { status: string }[] = [];
+  const { q } = queue({ persistSnapshot: async (s) => { saved.push(s); } });
+  const accepted = await q.submit(request(), { keyLabel: 'key-a' });
+  const id = (accepted as { accepted: { id: string } }).accepted.id;
+  q.cancel(id);
+  await settled();
+  assert.equal(saved.at(-1)?.status, 'cancelled');
 });
 
 test('a snapshot that cannot be written does not fail a good report', async () => {
