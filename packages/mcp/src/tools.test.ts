@@ -567,3 +567,22 @@ test('startResearch registers research_product as a tool that returns at once', 
     assert.match(warmth, /Call `research_product` to start one: it returns at once/);
   } finally { await corpus.close(); }
 });
+
+test('labels a source attached are printed beside the words, in get_receipt and in quotes, never inside the text', async () => {
+  const corpus = await corpusWith();
+  await corpus.addDocs([{
+    source: 'cfpb', kind: 'post', externalId: 'c1', channel: 'Chime Financial Inc',
+    text: 'chime closed my running shoes store account and kept the money for the running shoes', createdUtc: 1_700_000_000,
+    facets: { issue: 'Closing an account', company_response: 'Closed with monetary relief' },
+  }], 'running shoes');
+  const list = createTools({ corpus });
+  const call = (name: string, args: Record<string, unknown>) => list.find((t) => t.name === name)!.run(args);
+  try {
+    const id = (await corpus.byCategory('running shoes')).find((d) => d.source === 'cfpb')!.receiptId;
+    const receipt = await call('get_receipt', { receiptIds: [id] });
+    assert.match(receipt, /^labels: issue: Closing an account; company_response: Closed with monetary relief$/m);
+    const searched = await call('search_evidence', { query: 'kept the money', category: 'running shoes' });
+    assert.match(searched, /> labels: issue: Closing an account/);
+    assert.doesNotMatch(searched, /> [^\n]*Closing an account[^\n]*kept the money/, 'the label is not in the quoted words');
+  } finally { await corpus.close(); }
+});

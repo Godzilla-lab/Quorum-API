@@ -446,6 +446,8 @@ export function createTools(deps: ToolDeps): ToolDefinition[] {
         const when = doc.createdUtc ? new Date(doc.createdUtc * 1000).toISOString().slice(0, 10) : 'undated';
         out.push(`### \`${doc.receiptId}\``);
         out.push(`${doc.source} / ${doc.channel} / ${when}${doc.url ? ` / ${doc.url}` : ''}`);
+        /* The source's own labels, on their own line and never in the text. */
+        if (doc.facets) out.push(`labels: ${Object.entries(doc.facets).map(([k, v]) => `${k}: ${v}`).join('; ')}`);
         out.push('');
         const text = doc.text.replace(/\s+/g, ' ').trim();
         if (!full && text.length > RECEIPT_CHARS) {
